@@ -39,7 +39,7 @@ namespace AST {
     };
 
     struct Expr {
-        virtual void accept(Visitor&) {};
+        virtual void accept(Visitor&) const {};
     };
 
     using expr = std::shared_ptr<Expr>;
@@ -47,59 +47,59 @@ namespace AST {
     struct F64: Expr {
         const double val;
         F64(double v): val{v} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Bool: Expr {
         const bool val;
         Bool(bool v): val{v} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Proj: Expr {
         expr tuple;
         size_t field;
         Proj(const size_t f, const expr& t): tuple{t}, field{f} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Tuple: Expr {
         std::vector<expr> fields;
         Tuple() = default;
         Tuple(const std::vector<expr>& fs): fields{fs} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Var: Expr {
         const std::string name;
         Var(const std::string& n): name{n} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct App: Expr {
         expr fun;
         std::vector<expr> args;
         App(const expr& f, const std::vector<expr>& as): fun{f}, args{as} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Add: Expr {
         expr lhs, rhs;
         Add(const expr& l, const expr& r): lhs{l}, rhs{r} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Mul: Expr {
         expr lhs, rhs;
         Mul(const expr& l, const expr& r): lhs{l}, rhs{r} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Lam: Expr {
         std::vector<std::string> args;
         expr body;
         Lam(const std::vector<std::string>& as, const expr& b): args{as}, body{b} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Let: Expr {
@@ -107,7 +107,7 @@ namespace AST {
         expr val;
         expr body;
         Let(const std::string& n, const expr& v, const expr& b): var{n}, val{v}, body{b} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
     
     struct Cond: Expr {
@@ -115,15 +115,17 @@ namespace AST {
         expr on_t;
         expr on_f;
         Cond(const expr& p, const expr& t, const expr& f): pred{p}, on_t{t}, on_f{f} {}
-        virtual void accept(Visitor& v) override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
   
     struct ToSExp: Visitor {
         virtual std::string name() { return "to sexp"; }
 
         std::ostream& os;
+        int indent;
+        std::string prefix = "";
 
-        ToSExp(std::ostream& os_): os{os_} {}
+        ToSExp(std::ostream& os_, int i=0, const std::string& p=""): os{os_}, indent{i}, prefix{p} { os << prefix << std::string(indent, ' '); }
 
         virtual void visit(const Add& e) override {
             os << "(+ ";
@@ -136,7 +138,6 @@ namespace AST {
         virtual void visit(const Bool& e) override {
             os << (e.val ? "true" : "false");
         }
-
 
         virtual void visit(const F64& e) override { os << e.val; }
 
@@ -153,19 +154,23 @@ namespace AST {
         void visit(const Lam& e) {
             os << "(lambda (";
             for (const auto& arg: e.args) os << arg << " ";
-            os << ") ";
+            indent += 4;
+            os << ")\n" << prefix << std::string(indent, ' ');
             e.body->accept(*this);
             os << ")";
+            indent -= 4;
         }
 
         void visit(const Cond& e) {
             os << "(if ";
             e.pred->accept(*this);
-            os << " ";
+            indent += 4;
+            os << "\n" << prefix << std::string(indent, ' ');
             e.on_t->accept(*this);
-            os << " ";
+            os << "\n" << prefix << std::string(indent, ' ');
             e.on_f->accept(*this);
             os << ")";
+            indent -= 4;
         }
 
         void visit(const Tuple& e) {
@@ -198,8 +203,11 @@ namespace AST {
             os << "(let (" << e.var << " ";
             e.val->accept(*this);
             os << ") ";
+            indent += 4;
+            os << "\n" << prefix << std::string(indent, ' ');
             e.body->accept(*this);
             os << ")";
+            indent -= 4;
         }
     };
 
@@ -222,7 +230,7 @@ namespace AST {
         expr let(const std::string& var, const expr& bind, const expr& in) { return make_expr<Let>(var, bind, in); }
 
         expr pi(const std::string& var, size_t field, const expr& tuple, const expr& in) { return let(var, project(field, tuple), in); }
-        expr defn(const std::string& name, const std::vector<std::string>& args, const expr& body) { return let(name, lambda(args, body)); }
+        expr defn(const std::string& name, const std::vector<std::string>& args, const expr& body, const expr& in) { return let(name, lambda(args, body), in); }
 
         expr operator"" _var(const char* v, size_t) { return var(v); }
         expr operator"" _f64(long double v) { return f64(v); }

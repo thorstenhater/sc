@@ -20,6 +20,17 @@ namespace Types {
         }
     };
 
+    void type_error(const std::string& m, const AST::Expr* ctx=nullptr) {
+        std::stringstream ss;
+        ss << m;
+        if (ctx) {
+            ss << "\n";
+            auto sexp = AST::ToSExp(ss, 2, "  |");
+            ctx->accept(sexp);
+        }
+        throw TypeError{ss.str()};
+    }
+
     struct Type {
         virtual std::string show() { return "TYPE"; }
         virtual bool equal(const Type& ) const { return true; }
@@ -134,10 +145,9 @@ namespace Types {
             }
             return ty;
         }
-
         type type_of(const AST::expr& e) { return solve(types[e.get()]); }
 
-        void unify(const type& lhs, const type& rhs) {
+        void unify(const type& lhs, const type& rhs, const AST::Expr* ctx=nullptr) {
             auto ty_lhs = solve(lhs);
             auto ty_rhs = solve(rhs);
             if (*ty_lhs != *ty_rhs) {
@@ -158,7 +168,10 @@ namespace Types {
                     ty_var_rhs->alias = ty_lhs;
                     return;
                 }
-                throw TypeError{"Cannot unify types "s + ty_lhs->show() + " and " + ty_rhs->show()};
+
+                auto ss = std::stringstream{};
+                ss << "Cannot unify types " << ty_lhs->show() << " and " << ty_rhs->show();
+                type_error(ss.str(), ctx);
             }
         }
 
@@ -167,16 +180,16 @@ namespace Types {
         virtual void visit(const AST::Add& e) {
             e.lhs->accept(*this);
             e.rhs->accept(*this);
-            unify(types[e.lhs.get()], f64_t());
-            unify(types[e.rhs.get()], f64_t());
+            unify(types[e.lhs.get()], f64_t(), &e);
+            unify(types[e.rhs.get()], f64_t(), &e);
             types[&e] = f64_t();
         }
 
         virtual void visit(const AST::Mul& e) {
             e.lhs->accept(*this);
             e.rhs->accept(*this);
-            unify(types[e.lhs.get()], f64_t());
-            unify(types[e.rhs.get()], f64_t());
+            unify(types[e.lhs.get()], f64_t(), &e);
+            unify(types[e.rhs.get()], f64_t(), &e);
             types[&e] = f64_t();
         }
 
@@ -196,7 +209,7 @@ namespace Types {
             if (tuple_ty) {
                 if (e.field >= tuple_ty->size) {
                     if (tuple_ty->size) {
-                        throw TypeError("Tuple index error");
+                        type_error("Tuple index error: index="s + std::to_string(e.field), &e);
                     } else {
                         for (auto ix = tuple_ty->field_types.size(); ix <= e.field; ++ix) tuple_ty->field_types.push_back(var_t());
                     }
@@ -209,12 +222,12 @@ namespace Types {
             if (var_ty) {
                 auto tuple_ty = std::make_shared<TyTuple>();
                 for (auto ix = 0ul; ix <= e.field; ++ix) tuple_ty->field_types.push_back(var_t());
-                unify(types[e.tuple.get()], tuple_ty);
+                unify(types[e.tuple.get()], tuple_ty, &e);
                 types[&e] = tuple_ty->field_types[e.field];
                 return;
             }
 
-            throw TypeError("Expected a tuple");
+            type_error("Expected a tuple", &e);
         }
         virtual void visit(const AST::Var& e) {
             // walk contexts outwards and search
@@ -231,14 +244,14 @@ namespace Types {
             Type* ty = types[&(*e.fun)].get();
             TyFunc* func_t = dynamic_cast<TyFunc*>(ty);
             if (!func_t) {
-                throw TypeError{"Got "s + ty->show() + " expected a function"};
+                type_error("Got "s + ty->show() + " expected a function", &e);
             }
             if (e.args.size() != func_t->args.size()) {
-                throw TypeError{"Arity does not match: "s + ty->show()};
+                type_error("Arity does not match: "s + ty->show(), &e);
             }
             for (auto ix = 0ul; ix < e.args.size(); ++ix) {
                 e.args[ix]->accept(*this);
-                unify(func_t->args[ix], types[e.args[ix].get()]);
+                unify(func_t->args[ix], types[e.args[ix].get()], &e);
             }
             types[&e] = func_t->result;
         }
@@ -266,8 +279,8 @@ namespace Types {
             e.pred->accept(*this);
             e.on_t->accept(*this);
             e.on_f->accept(*this);
-            unify(types[e.pred.get()], bool_t());
-            unify(types[e.on_t.get()], types[e.on_f.get()]);
+            unify(types[e.pred.get()], bool_t(), &e);
+            unify(types[e.on_t.get()], types[e.on_f.get()], &e);
             types[&e] = types[e.on_t.get()];
         }
     };
