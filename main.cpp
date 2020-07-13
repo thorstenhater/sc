@@ -1,7 +1,10 @@
 #include "AST.hpp"
 #include "Types.hpp"
+#include "CPS.hpp"
 
-void print_ast_sexp(AST::expr& e) {
+using namespace AST::convenience;
+
+void compile(const AST::expr& e) {
     auto sexp = AST::ToSExp(std::cout);
     e->accept(sexp);
     try {
@@ -11,42 +14,21 @@ void print_ast_sexp(AST::expr& e) {
     } catch (Types::TypeError& e) {
         std::cout << "\n  TypeError: " << e.what() << '\n';
     }
+    auto cps = CPS::naive::ToCPS().convert(e);
+    auto cps_to_sexp = CPS::naive::ToSExp(std::cout);
+    cps_to_sexp(cps);
+    std::cout << '\n';
 }
 
-using namespace AST::convenience;
-
 int main() {
-    auto sum = (23.0_f64 + 42.0_f64);
-    print_ast_sexp(sum);
-
-    auto f1 = lambda({}, (23.0_f64 + 42.0_f64));
-    print_ast_sexp(f1);
-
-    auto f2 = lambda({"a"}, (23.0_f64 + 42.0_f64));
-    print_ast_sexp(f2);
-
-    auto fun = lambda({"a"}, ("a"_var + 42.0_f64));
-    print_ast_sexp(fun);
-
-    auto list = tuple({1.0_f64, 2.0_f64, 3.0_f64});
-    print_ast_sexp(list);
-
-    auto let1 = let("a", 2.0_f64, (23.0_f64 + "a"_var));
-    print_ast_sexp(let1);
-
-    auto let2 = let("a", 2.0_f64,
-                    let("b", "a"_var,
-                        (23.0_f64 + "b"_var)));
-    print_ast_sexp(let2);
-
-    auto ite = cond(no(), 2.0_f64, (3.0_f64 + 4.0_f64));
-    print_ast_sexp(ite);
-
-    auto test1 = apply(fun, {list});
-    print_ast_sexp(test1);
-
-    auto test2 = apply(sum, {list});
-    print_ast_sexp(test2);
+    compile("a"_var);
+    compile(42.0_f64);
+    compile(let("a", 42.0_f64, "a"_var));
+    compile(lambda({"a"}, "a"_var));
+    compile(tuple({23.0_f64}));
+    compile(tuple({23.0_f64, 42.0_f64}));
+    compile(tuple({23.0_f64, 42.0_f64, 7.0_f64}));
+    compile(add(23.0_f64, 42.0_f64));
 
     auto Ih_current =
         lambda({"sim", "mech"},
@@ -60,5 +42,6 @@ int main() {
                                   let("g_new",
                                       ("sim_g"_var + ("mech_gbar"_var * "mech_m"_var)),
                                       tuple({"i_new"_var, "g_new"_var})))))))));
-    print_ast_sexp(Ih_current);
+    compile(Ih_current);
+    compile(let("a", 42.0_f64, let("b", "a"_var, "b"_var)));
 }
