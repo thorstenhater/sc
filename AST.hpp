@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <vector>
 #include <string>
 #include <memory>
@@ -12,7 +13,6 @@
 using namespace std::string_literals;
 
 namespace AST {
-    struct Add;
     struct F64;
     struct Bool;
     struct Tuple;
@@ -20,14 +20,13 @@ namespace AST {
     struct Var;
     struct App;
     struct Lam;
-    struct Mul;
+    struct Prim;
     struct Let;
     struct Cond;
 
     struct Visitor {
         virtual void visit(const F64&)   = 0;
-        virtual void visit(const Add&)   = 0;
-        virtual void visit(const Mul&)   = 0;
+        virtual void visit(const Prim&)   = 0;
         virtual void visit(const Tuple&) = 0;
         virtual void visit(const Proj&)  = 0;
         virtual void visit(const Var&)   = 0;
@@ -39,6 +38,7 @@ namespace AST {
     };
 
     struct Expr {
+        void hi() { std::cout << "hi from expr\n"; }
         virtual void accept(Visitor&) const {};
     };
 
@@ -46,31 +46,36 @@ namespace AST {
 
     struct F64: Expr {
         const double val;
+        virtual ~F64() = default;
         F64(double v): val{v} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); }
     };
 
     struct Bool: Expr {
         const bool val;
+        virtual ~Bool() = default;
         Bool(bool v): val{v} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); }
     };
 
     struct Proj: Expr {
         expr tuple;
         size_t field;
+        virtual ~Proj() = default;
         Proj(const size_t f, const expr& t): tuple{t}, field{f} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
+        virtual void accept(Visitor& v) const override { v.visit(*this); }
     };
 
     struct Tuple: Expr {
         std::vector<expr> fields;
+        virtual ~Tuple() = default;
         Tuple() = default;
         Tuple(const std::vector<expr>& fs): fields{fs} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Var: Expr {
+        virtual ~Var() = default;
         const std::string name;
         Var(const std::string& n): name{n} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
@@ -78,26 +83,24 @@ namespace AST {
 
     struct App: Expr {
         expr fun;
-        std::vector<expr> args;
-        App(const expr& f, const std::vector<expr>& as): fun{f}, args{as} {}
+        expr args;
+        virtual ~App() = default;
+        App(const expr& f, const std::vector<expr>& as): fun{f}, args{std::make_shared<Tuple>(as)} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
-    struct Add: Expr {
-        expr lhs, rhs;
-        Add(const expr& l, const expr& r): lhs{l}, rhs{r} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
-    };
-
-    struct Mul: Expr {
-        expr lhs, rhs;
-        Mul(const expr& l, const expr& r): lhs{l}, rhs{r} {}
+    struct Prim: Expr {
+        std::string op;
+        expr args;
+        virtual ~Prim() = default;
+        Prim(const std::string& o, const std::vector<expr>& as): op{o}, args{std::make_shared<Tuple>(as)} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
     struct Lam: Expr {
         std::vector<std::string> args;
         expr body;
+        virtual ~Lam() = default;
         Lam(const std::vector<std::string>& as, const expr& b): args{as}, body{b} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
@@ -106,6 +109,7 @@ namespace AST {
         std::string var;
         expr val;
         expr body;
+        virtual ~Let() = default;
         Let(const std::string& n, const expr& v, const expr& b): var{n}, val{v}, body{b} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
@@ -114,6 +118,7 @@ namespace AST {
         expr pred;
         expr on_t;
         expr on_f;
+        virtual ~Cond() = default;
         Cond(const expr& p, const expr& t, const expr& f): pred{p}, on_t{t}, on_f{f} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
@@ -127,11 +132,11 @@ namespace AST {
 
         ToSExp(std::ostream& os_, int i=0, const std::string& p=""): os{os_}, indent{i}, prefix{p} { os << prefix << std::string(indent, ' '); }
 
-        virtual void visit(const Add& e) override {
-            os << "(+ ";
-            e.lhs->accept(*this);
-            os << " ";
-            e.rhs->accept(*this);
+        virtual void visit(const Prim& e) override {
+            os << "("
+               << e.op
+               << " ";
+            e.args->accept(*this);
             os << ")";
         }
 
@@ -141,19 +146,13 @@ namespace AST {
 
         virtual void visit(const F64& e) override { os << e.val; }
 
-        void visit(const Mul& e) {
-            os << "(* ";
-            e.lhs->accept(*this);
-            os << " ";
-            e.rhs->accept(*this);
-            os << ")";
-        }
+        virtual void visit(const Var& e) override { os << e.name; }
 
-        void visit(const Var& e) { os << e.name; }
-
-        void visit(const Lam& e) {
+        virtual void visit(const Lam& e) override {
             os << "(lambda (";
-            for (const auto& arg: e.args) os << arg << " ";
+            for (const auto& arg: e.args) {
+                os << arg << " ";
+            }
             indent += 4;
             os << ")\n" << prefix << std::string(indent, ' ');
             e.body->accept(*this);
@@ -161,7 +160,7 @@ namespace AST {
             indent -= 4;
         }
 
-        void visit(const Cond& e) {
+        virtual void visit(const Cond& e) override {
             os << "(if ";
             e.pred->accept(*this);
             indent += 4;
@@ -173,7 +172,7 @@ namespace AST {
             indent -= 4;
         }
 
-        void visit(const Tuple& e) {
+        virtual void visit(const Tuple& e) override {
             os << "(";
             for (const auto& field: e.fields) {
                 field->accept(*this);
@@ -182,24 +181,21 @@ namespace AST {
             os << ")";
         }
 
-        void visit(const Proj& e) {
+        virtual void visit(const Proj& e) override {
             os << "(pi-" << e.field << " ";
             e.tuple->accept(*this);
             os << ")";
         }
 
-        void visit(const App& e) {
+        virtual void visit(const App& e) override {
             os << "(";
             e.fun->accept(*this);
             os << " ";
-            for (const auto& arg: e.args) {
-                arg->accept(*this);
-                os << " ";
-            }
+            e.args->accept(*this);
             os << ")";
         }
 
-        void visit(const Let& e) {
+        virtual void visit(const Let& e) override {
             os << "(let (" << e.var << " ";
             e.val->accept(*this);
             os << ") ";
@@ -212,30 +208,29 @@ namespace AST {
     };
 
     namespace convenience {
-        template<typename E, typename... Ts> expr make_expr(const Ts&... args) { return std::make_shared<E>(E(args...)); }
-        expr nil() { return make_expr<Tuple>(); }
-        expr yes() { return make_expr<Bool>(true); }
-        expr no() { return make_expr<Bool>(false); }
-        expr tuple(const std::vector<expr>& fs) { return make_expr<Tuple>(fs); }
-        expr project(size_t i, const expr& f) { return make_expr<Proj>(i, f); }
-        expr cond(const expr& p, const expr& t, const expr& f) { return make_expr<Cond>(p, t, f); }
-        expr f64(double v) { return make_expr<F64>(v); }
-        expr var(const std::string& n) { return make_expr<Var>(n); }
-        expr add(const expr& l, const expr& r) { return make_expr<Add>(l, r); }
-        expr mul(const expr& l, const expr& r) { return make_expr<Mul>(l, r); }
-        expr neg(const expr& r) { return make_expr<Mul>(f64(-1), r); }
-        expr sub(const expr& l, const expr& r) { return make_expr<Add>(l, neg(r)); }
-        expr lambda(const std::vector<std::string>& args, const expr& body) { return make_expr<Lam>(args, body); }
-        expr apply(const expr& fun, const std::vector<expr>&& args) { return make_expr<App>(fun, args); }
-        expr let(const std::string& var, const expr& bind, const expr& in) { return make_expr<Let>(var, bind, in); }
+        template<typename E, typename... Ts> expr make_expr(const Ts&... args);
+        expr nil();
+        expr yes();
+        expr no();
+        expr tuple(const std::vector<expr>& fs);
+        expr project(size_t i, const expr& f);
+        expr cond(const expr& p, const expr& t, const expr& f);
+        expr f64(double v);
+        expr var(const std::string& n);
+        expr add(const expr& l, const expr& r);
+        expr mul(const expr& l, const expr& r);
+        expr sub(const expr& l, const expr& r);
+        expr lambda(const std::vector<std::string>& args, const expr& body);
+        expr apply(const expr& fun, const std::vector<expr>&& args);
+        expr let(const std::string& var, const expr& bind, const expr& in);
 
-        expr pi(const std::string& var, size_t field, const expr& tuple, const expr& in) { return let(var, project(field, tuple), in); }
-        expr defn(const std::string& name, const std::vector<std::string>& args, const expr& body, const expr& in) { return let(name, lambda(args, body), in); }
+        expr pi(const std::string& var, size_t field, const expr& tuple, const expr& in);
+        expr defn(const std::string& name, const std::vector<std::string>& args, const expr& body, const expr& in);
 
-        expr operator"" _var(const char* v, size_t) { return var(v); }
-        expr operator"" _f64(long double v) { return f64(v); }
-        expr operator *(const expr& l, const expr& r) { return mul(l, r); }
-        expr operator +(const expr& l, const expr& r) { return add(l, r); }
-        expr operator -(const expr& l, const expr& r) { return sub(l, r); }
+        expr operator"" _var(const char* v, size_t);
+        expr operator"" _f64(long double v);
+        expr operator *(const expr& l, const expr& r);
+        expr operator +(const expr& l, const expr& r);
+        expr operator -(const expr& l, const expr& r);
     }
 }
