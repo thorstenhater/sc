@@ -74,7 +74,6 @@ namespace TailCPS {
         virtual void accept(Visitor& v) const { v.visitV(*this); };
     };
 
-
     struct Bool: Value {
         bool value;
         Bool(bool v): value{v} { }
@@ -109,6 +108,15 @@ namespace TailCPS {
         variable tuple;
         virtual ~LetT() = default;
         LetT(int f, const std::string& n, const std::string& t, const term& i): Let{n, i}, field{f}, tuple{t} {}
+        virtual void accept(Visitor& v) const override { v.visitT(*this); };
+    };
+
+    struct LetF: Let {
+        variable cont;
+        std::vector<variable> args;
+        term body;
+        virtual ~LetF() = default;
+        LetF(const std::string& n, const std::string& c, const std::vector<variable>& as, const term& b, const term& i): Let{n, i}, cont{c}, args{as}, body{b} {}
         virtual void accept(Visitor& v) const override { v.visitT(*this); };
     };
 
@@ -161,13 +169,10 @@ namespace TailCPS {
         term halt(const variable& v);
 
         template<typename E, typename... Ts> value make_value(const Ts&... args);
-        value lambda(const std::string& c, const std::vector<variable>& as, const term& b);
         value f64(double v);
         value boolean(bool v);
         value tuple(const std::vector<variable>& fs);
     }
-
-    std::string genvar();
 
     using namespace convenience;
 
@@ -248,6 +253,21 @@ namespace TailCPS {
                << e.arg
                << ")";
         }
+        virtual void visitT(const LetF& e) override {
+            os << "(let-func "
+               << e.name
+               << " "
+               << e.cont
+               << " (";
+            for (const auto& arg: e.args) os << arg << " ";
+            indent += 4;
+            os << ")\n" << prefix << std::string(indent, ' ');
+            e.body->accept(*this);
+            os << ")";
+            indent -= 4;
+        };
+
+
 
         virtual void visitV(const Tuple& v) override {
             os << "(";
@@ -262,27 +282,18 @@ namespace TailCPS {
         virtual void visitV(const Bool& v) override {
             os << v.value;
         };
-
-        virtual void visitV(const Lambda& v) override {
-            os << "(lambda "
-               << v.cont
-               << " (";
-            for (const auto& arg: v.args) os << arg << " ";
-            indent += 4;
-            os << ")\n" << prefix << std::string(indent, ' ');
-            v.body->accept(*this);
-            os << ")";
-            indent -= 4;
-        };
     };
 
     struct ToCPS;
 
     struct ToCPSHelper: AST::Visitor {
+
         ToCPS& parent;
         term result;
         variable ctx;
         ToCPSHelper(ToCPS&p): parent{p} {}
+
+        std::string genvar();
 
         virtual void visit(const AST::F64&)   override;
         virtual void visit(const AST::Bool&)  override;
@@ -300,14 +311,19 @@ namespace TailCPS {
     };
 
     struct ToCPS: AST::Visitor {
+        size_t counter;
         ToCPSHelper helper;
 
-        ToCPS(): helper{*this} {}
+
+
+        ToCPS(): counter{0}, helper{*this} {}
 
         using context = std::function<term(variable)>;
         context ctx = [&](auto v) { return halt(v); };
 
         term result;
+
+        std::string genvar();
 
         term convert(const AST::expr& e) {
             e->accept(*this);

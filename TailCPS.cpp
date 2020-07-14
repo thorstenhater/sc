@@ -13,15 +13,17 @@ namespace TailCPS {
         term halt(const variable& v) { return make_term<Halt>(v); }
 
         template<typename E, typename... Ts> value make_value(const Ts&... args) { return std::make_shared<E>(E(args...)); }
-        value lambda(const std::string& c, const std::vector<variable>& as, const term& b) { return make_value<Lambda>(c, as, b); }
         value f64(double v) { return make_value<F64>(v); }
         value boolean(bool v) { return make_value<Bool>(v); }
         value tuple(const std::vector<variable>& fs) { return make_value<Tuple>(fs); }
     }
 
-    std::string genvar() {
-        static int counter = 0;
+    std::string ToCPS::genvar() {
         return "__var_" + std::to_string(counter++);
+    }
+
+    std::string ToCPSHelper::genvar() {
+        return parent.genvar();
     }
 
     void ToCPSHelper::visit(const AST::Var& e) {
@@ -38,31 +40,28 @@ namespace TailCPS {
     void ToCPSHelper::visit(const AST::Proj& e) {
         auto kappa = parent.ctx;
         auto x = genvar();
-        parent.ctx = [&](auto z){
+        auto k = ctx;
+        parent.ctx = [&](const auto& z){
             parent.result = pi(e.field, x, z, app_cont(k, x));
+            return parent.result;
         };
         e.tuple->accept(parent);
         result = parent.result;
         parent.ctx = kappa;
     }
+    // NB. this is different (WRONG!) in Kennedy'07
     void ToCPSHelper::visit(const AST::Lam& e) {
-    }
-
-
-
-    void ToCPSHelper::visit(const AST::Lam& e) {
-        auto f = genvar();
-        auto j = genvar();
-        auto x = e.args;
+        // recurse into body
         auto tmp = ctx;
+        auto j = genvar();
         ctx = j;
+        e.body->accept(*this);
         auto body = result;
-        result = let(f, lambda(j, x, body), app_cont(ctx, f));
         ctx = tmp;
+        // generate result
+        auto f = genvar();
+        result = let_func(f, j, e.args, body, app_cont(ctx, f));
     }
-
-
-
     void ToCPSHelper::visit(const AST::App& e) {
         auto args = e.args;
         auto kappa = parent.ctx;
@@ -90,20 +89,7 @@ namespace TailCPS {
         result = parent.result;
         parent.ctx = kappa;
     }
-    void ToCPSHelper::visit(const AST::Let& e) {
-        auto x = e.var;
-        auto j = genvar();
-
-        e.body->accept(*this);
-        auto body = result;
-
-        ctx = j;
-        e.val->accept(*this);
-        auto in = result;
-        result = let_cont(j, {x}, body, in);
-    }
-
-    void ToCPSHelper::tuple_helper(const std::vector<AST::expr>& fields, size_t ix, const variable& x, std::vector<variable>& xs, const variable& kappa) {
+     void ToCPSHelper::tuple_helper(const std::vector<AST::expr>& fields, size_t ix, const variable& x, std::vector<variable>& xs, const variable& kappa) {
         auto tmp = parent.ctx;
         parent.ctx = [&](auto z1) {
             xs.push_back(z1);
@@ -123,5 +109,17 @@ namespace TailCPS {
         auto x = genvar();
         std::vector<variable> xs{};
         tuple_helper(e.fields, 0, x, xs, kappa);
+    }
+    void ToCPSHelper::visit(const AST::Let& e) {
+        auto x = e.var;
+        auto j = genvar();
+
+        e.body->accept(*this);
+        auto body = result;
+
+        ctx = j;
+        e.val->accept(*this);
+        auto in = result;
+        result = let_cont(j, {x}, body, in);
     }
 }
