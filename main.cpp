@@ -11,7 +11,7 @@ void compile(const AST::expr e) {
     e->accept(sexp);
     try {
         auto types = Types::TypeCheck();
-        std::cout << "\n  : " << types.type_of(e)->show() << "\n";
+        std::cout << "\n  : " << Types::show_type(types.type_of(e)) << "\n";
         std::cout << '\n';
     } catch (Types::TypeError& e) {
         std::cout << "\n  TypeError: " << e.what() << '\n';
