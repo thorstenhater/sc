@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <exception>
+#include <variant>
 
 #include "AST.hpp"
 
@@ -28,133 +29,97 @@ namespace TailCPS {
     struct F64;
     struct Bool;
 
-    struct Visitor {
-        virtual void visitT(const LetV&) {}
-        virtual void visitT(const LetC&) {}
-        virtual void visitT(const LetT&) {}
-        virtual void visitT(const LetF&) {}
-        virtual void visitT(const Halt&) {}
-        virtual void visitT(const AppC&) {}
-        virtual void visitT(const AppF&) {}
-        virtual void visitT(const AppP&) {}
-
-        virtual void visitV(const Tuple&) {}
-        virtual void visitV(const F64&) {}
-        virtual void visitV(const Bool&) {}
-    };
-
     // Variables
     using variable = std::string;
+    using Value    = std::variant<Tuple,
+                                  F64,
+                                  Bool>;
+    using value    = std::shared_ptr<Value>;
+    using Term     = std::variant<LetV,
+                                  LetC,
+                                  LetT,
+                                  LetF,
+                                  AppC,
+                                  AppF,
+                                  AppP,
+                                  Halt>;
+    using term     = std::shared_ptr<Term>;
 
-    // Values
-    struct Value {
-        virtual void accept(Visitor&) const {};
-    };
-
-    using value = std::shared_ptr<Value>;
-
-    // Terms
-    struct Term {
-        virtual void accept(Visitor&) const {};
-    };
-
-    using term = std::shared_ptr<Term>;
-
-    struct Tuple: Value  {
+    struct Tuple  {
         std::vector<variable> fields;
-        virtual ~Tuple() = default;
         Tuple(const std::vector<std::string>& fs): fields{fs} {}
-        virtual void accept(Visitor& v) const { v.visitV(*this); };
     };
 
-    struct F64: Value {
+    struct F64 {
         double value;
-        virtual ~F64() = default;
         F64(double v): value{v} { }
-        virtual void accept(Visitor& v) const { v.visitV(*this); };
     };
 
-    struct Bool: Value {
+    struct Bool {
         bool value;
         Bool(bool v): value{v} { }
-        virtual ~Bool() = default;
-        virtual void accept(Visitor& v) const { v.visitV(*this); };
     };
 
-    struct Halt: Term {
-        virtual ~Halt() = default;
+    struct Halt {
         variable name;
         Halt(const std::string&n): name{n} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
     };
 
-    // Bindings
-    struct Let: Term {
+    struct LetV {
         variable name;
         term in;
-        virtual ~Let() = default;
-        Let(const std::string& n, const term& i): name{n}, in{i} {}
-    };
-
-    struct LetV: Let {
         value val;
-        LetV(const std::string& n, const value& v, const term& i): Let{n, i}, val{v} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
+        LetV(const std::string& n, const value& v, const term& i): name{n}, in{i}, val{v} {}
     };
 
     // Tuple projection
-    struct LetT: Let {
+    struct LetT {
+        variable name;
+        term in;
         int field;
         variable tuple;
         virtual ~LetT() = default;
-        LetT(int f, const std::string& n, const std::string& t, const term& i): Let{n, i}, field{f}, tuple{t} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
+        LetT(int f, const std::string& n, const std::string& t, const term& i): name{n}, in{i}, field{f}, tuple{t} {}
     };
 
-    struct LetF: Let {
+    struct LetF {
+        variable name;
+        term in;
         variable cont;
         std::vector<variable> args;
         term body;
-        virtual ~LetF() = default;
-        LetF(const std::string& n, const std::string& c, const std::vector<variable>& as, const term& b, const term& i): Let{n, i}, cont{c}, args{as}, body{b} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
+        LetF(const std::string& n, const std::string& c, const std::vector<variable>& as, const term& b, const term& i): name{n}, in{i}, cont{c}, args{as}, body{b} {}
     };
 
     // Local continuation
-    struct LetC: Let {
+    struct LetC {
+        variable name;
+        term in;
         std::vector<variable> args;
         term body;
-        virtual ~LetC() = default;
-        LetC(const std::string& n, const std::vector<variable>& as, const term& b, const term& i): Let{n, i}, args{as}, body{b} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
+        LetC(const std::string& n, const std::vector<variable>& as, const term& b, const term& i): name{n}, in{i}, args{as}, body{b} {}
     };
 
     // Apply Continuation c a0 a1 ...
-    struct AppC: Term {
+    struct AppC {
         variable name;
         variable arg;
-        virtual ~AppC() = default;
         AppC(const std::string& n, const variable& a): name{n}, arg{a} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
     };
 
     // Apply function f c a0 a1 ...
-    struct AppF: Term {
-        variable func;
+    struct AppF {
+        variable name;
         variable cont;
         variable arg;
-        virtual ~AppF() = default;
-        AppF(const std::string& f, const std::string& c, const variable& a): func{f}, cont{c}, arg{a} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
+        AppF(const std::string& f, const std::string& c, const variable& a): name{f}, cont{c}, arg{a} {}
     };
 
-    struct AppP: Term {
-        variable func;
+    struct AppP {
+        variable name;
         variable cont;
         variable arg;
-        virtual ~AppP() = default;
-        AppP(const std::string& f, const std::string& c, const variable& a): func{f}, cont{c}, arg{a} {}
-        virtual void accept(Visitor& v) const override { v.visitT(*this); };
+        AppP(const std::string& f, const std::string& c, const variable& a): name{f}, cont{c}, arg{a} {}
     };
 
     namespace convenience {
@@ -176,42 +141,41 @@ namespace TailCPS {
 
     using namespace convenience;
 
-    struct ToSExp: Visitor {
+    struct ToSExp {
         std::ostream& os;
         int indent;
         std::string prefix = "";
 
-        ToSExp(std::ostream& os_, int i=0, const std::string& p=""): os{os_}, indent{i}, prefix{p} { os << prefix << std::string(indent, ' '); }
-
-        void operator()(const term& cps) {
-            cps->accept(*this);
+        ToSExp(std::ostream& os_, int i=0, const std::string& p=""):
+            os{os_}, indent{i}, prefix{p} {
+            os << prefix << std::string(indent, ' ');
         }
 
-        virtual void visitT(const LetV& e) override {
+        void operator()(const LetV& e) {
             os << "(let-value ("
                << e.name
                << " ";
-            e.val->accept(*this);
+            std::visit(*this, *e.val);
             indent += 4;
             os << ")\n" << prefix << std::string(indent, ' ');
-            e.in->accept(*this);
+            std::visit(*this, *e.in);
             os << ")";
             indent -= 4;
         }
-        virtual void visitT(const LetC& e) override {
+        void operator()(const LetC& e) {
             os << "(let-cont ("
                << e.name
                << " (";
             for(const auto& arg: e.args) os << arg << " ";
             indent += 4;
             os << ")\n" << prefix << std::string(indent, ' ');
-            e.body->accept(*this);
+            std::visit(*this, *e.body);
             os << "\n" << prefix << std::string(indent, ' ');
-            e.in->accept(*this);
+            std::visit(*this, *e.in);
             os << ")";
             indent -= 4;
         }
-        virtual void visitT(const LetT& e) override {
+        void operator()(const LetT& e) {
             os << "(pi-"
                << e.field
                << " "
@@ -220,40 +184,40 @@ namespace TailCPS {
                << e.tuple;
             indent += 4;
             os << ")\n" << prefix << std::string(indent, ' ');
-            e.in->accept(*this);
+            std::visit(*this, *e.in);
             os << ")";
             indent -= 4;
         }
-        virtual void visitT(const Halt& e) override {
+        void operator()(const Halt& e) {
             os << "(halt "
                << e.name
                << ")";
         }
-        virtual void visitT(const AppC& e) override {
+        void operator()(const AppC& e) {
             os << "(apply-cont "
                << e.name
                << " "
                << e.arg
                << ")";
         }
-        virtual void visitT(const AppF& e) override {
+        void operator()(const AppF& e) {
             os << "(apply-func "
-               << e.func
+               << e.name
                << " "
                << e.cont
                << " "
                << e.arg << ")";
         }
-        virtual void visitT(const AppP& e) override {
+        void operator()(const AppP& e) {
             os << "(apply-prim "
-               << e.func
+               << e.name
                << " "
                << e.cont
                << " "
                << e.arg
                << ")";
         }
-        virtual void visitT(const LetF& e) override {
+        void operator()(const LetF& e) {
             os << "(let-func "
                << e.name
                << " "
@@ -262,24 +226,19 @@ namespace TailCPS {
             for (const auto& arg: e.args) os << arg << " ";
             indent += 4;
             os << ")\n" << prefix << std::string(indent, ' ');
-            e.body->accept(*this);
+            std::visit(*this, *e.body);
             os << ")";
             indent -= 4;
         };
-
-
-
-        virtual void visitV(const Tuple& v) override {
+        void operator()(const Tuple& v) {
             os << "(";
             for (const auto& field: v.fields) os << field << ", ";
             os << ")";
         };
-
-        virtual void visitV(const F64& v) override {
+        void operator()(const F64& v) {
             os << v.value;
         };
-
-        virtual void visitV(const Bool& v) override {
+        void operator()(const Bool& v) {
             os << v.value;
         };
     };
@@ -313,8 +272,6 @@ namespace TailCPS {
     struct ToCPS: AST::Visitor {
         size_t counter;
         ToCPSHelper helper;
-
-
 
         ToCPS(): counter{0}, helper{*this} {}
 
@@ -415,4 +372,127 @@ namespace TailCPS {
         }
         virtual void visit(const AST::Cond&)  override {}
     };
+
+    term ast_to_cps(const AST::expr&);
+    void cps_to_sexp(std::ostream&, const term&);
+
+    struct Substitute {
+        std::unordered_map<std::string, std::string> mapping;
+        Substitute(const std::unordered_map<std::string, std::string>& m): mapping{m} {}
+
+        term operator()(const LetV& e) {
+            auto tmp = e;
+            tmp.in = std::visit(*this, *tmp.in);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const LetC& e) {
+            auto tmp = e;
+            tmp.in   = std::visit(*this, *tmp.in);
+            tmp.body = std::visit(*this, *tmp.body);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const LetT& e) {
+            auto tmp = e;
+            replace(tmp.tuple);
+            tmp.in = std::visit(*this, *tmp.in);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const LetF& e) {
+            auto tmp = e;
+            tmp.in   = std::visit(*this, *tmp.in);
+            tmp.body = std::visit(*this, *tmp.body);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const AppC& e) {
+            auto tmp = e;
+            replace(tmp.name);
+            replace(tmp.arg);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const AppF& e) {
+            auto tmp = e;
+            replace(tmp.name);
+            replace(tmp.cont);
+            replace(tmp.arg);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const AppP& e) {
+            auto tmp = e;
+            replace(tmp.cont);
+            replace(tmp.arg);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const Halt& e) {
+            auto tmp = e;
+            replace(tmp.name);
+            return std::make_shared<Term>(tmp);
+        }
+
+        void replace(std::string& name) {
+            if (mapping.find(name) != mapping.end()) {
+                name = mapping[name];
+            }
+        }
+    };
+
+    term substitute(const term& t, const std::unordered_map<variable, variable>& mapping);
+
+    struct BetaCont {
+        std::unordered_map<variable, std::pair<std::vector<variable>, term>> continuations;
+
+        term operator()(const LetV& e) {
+            auto tmp = e;
+            tmp.in = std::visit(*this, *tmp.in);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const LetC& e) {
+            if (e.name == "__var_22") {
+                auto body = std::visit(*this, *e.body);
+                continuations[e.name] = {e.args, body};
+                auto in = std::visit(*this, *e.in);
+                return in;
+            } else {
+                auto tmp = e;
+                return std::make_shared<Term>(tmp);
+            }
+        }
+        term operator()(const LetT& e) {
+            auto tmp = e;
+            tmp.in = std::visit(*this, *tmp.in);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const LetF& e) {
+            auto tmp = e;
+            tmp.in   = std::visit(*this, *tmp.in);
+            tmp.body = std::visit(*this, *tmp.body);
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const AppC& e) {
+            if (continuations.find(e.name) == continuations.end()) {
+                return std::make_shared<Term>(e);
+            } else {
+                auto args =  continuations[e.name].first;
+                auto body = *continuations[e.name].second;
+                auto subst = std::unordered_map<variable, variable>{};
+                for (auto ix = 0; ix < args.size(); ix++) {
+                    subst[args[ix]] = e.arg;
+                }
+                return std::make_shared<Term>(body);
+            }
+        }
+        term operator()(const AppF& e) {
+            auto tmp = e;
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const AppP& e) {
+            auto tmp = e;
+            return std::make_shared<Term>(tmp);
+        }
+        term operator()(const Halt& e) {
+            auto tmp = e;
+            return std::make_shared<Term>(tmp);
+        }
+    };
+
+    term beta_cont(const term& t);
 }

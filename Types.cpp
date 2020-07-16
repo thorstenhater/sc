@@ -74,4 +74,10 @@ namespace Types {
     bool operator==(const TyBool&, const TyBool&) { return true; }
     bool operator==(const TyF64&, const TyF64&) { return true; }
     bool operator==(const TyVar& lhs, const TyVar& rhs) { return lhs.name == rhs.name; }
+
+    type typecheck(const AST::expr& e) {
+        auto types = Types::TypeCheck();
+        e->accept(types);
+        return types.result;
+    }
 }

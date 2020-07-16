@@ -18,12 +18,9 @@ namespace CPS {
         value tuple(const std::vector<variable>& fs) { return make_value<Tuple>(fs); }
     }
 
-    std::string ToCPS::genvar() {
-        return "__var_" + std::to_string(counter++);
-    }
-
-    std::string ToCPSImprovedHelper::genvar() {
-        return parent.genvar();
+    std::string genvar() {
+        static int counter = 0;
+        return "__cps_var_" + std::to_string(counter++);
     }
 
     void ToCPSImprovedHelper::visit(const AST::Proj& e) {
@@ -118,5 +115,22 @@ namespace CPS {
         auto x = genvar();
         std::vector<variable> xs{};
         tuple_helper(e.fields, 0, x, xs, kappa);
+    }
+
+    term ast_to_naive_cps(const AST::expr& e) {
+        auto to_cps = ToCPS();
+        e->accept(to_cps);
+        return to_cps.result;
+    }
+
+    term ast_to_cps(const AST::expr& e) {
+        auto to_cps = ToCPSImproved();
+        e->accept(to_cps);
+        return to_cps.result;
+    }
+
+    void cps_to_sexp(std::ostream& os, const term& t) {
+        ToSExp to_sexp(os);
+        t->accept(to_sexp);
     }
 }

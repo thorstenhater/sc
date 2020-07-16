@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <vector>
 #include <string>
 #include <memory>
@@ -38,7 +39,6 @@ namespace AST {
     };
 
     struct Expr {
-        void hi() { std::cout << "hi from expr\n"; }
         virtual void accept(Visitor&) const {};
     };
 
@@ -76,7 +76,7 @@ namespace AST {
 
     struct Var: Expr {
         virtual ~Var() = default;
-        const std::string name;
+        std::string name;
         Var(const std::string& n): name{n} {}
         virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
@@ -206,6 +206,30 @@ namespace AST {
             indent -= 4;
         }
     };
+
+    void to_sexp(std::ostream& os, const expr& e);
+
+    std::string genvar();
+
+    struct AlphaConvert: Visitor {
+        expr result;
+        std::vector<std::pair<std::string, std::string>> env;
+        void push_env(const std::string&, const std::string&);
+        void pop_env();
+        std::optional<std::string> find_env(const std::string&);
+        virtual void visit(const F64& e) override;
+        virtual void visit(const Bool& e) override;
+        virtual void visit(const Prim& e) override;
+        virtual void visit(const Tuple& e) override;
+        virtual void visit(const Proj& e) override;
+        virtual void visit(const Var& e) override;
+        virtual void visit(const Let& e) override;
+        virtual void visit(const Lam& e) override;
+        virtual void visit(const App& e) override;
+        virtual void visit(const Cond& e) override;
+    };
+
+    expr alpha_convert(const expr& e);
 
     namespace convenience {
         template<typename E, typename... Ts> expr make_expr(const Ts&... args);

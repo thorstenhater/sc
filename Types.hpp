@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <unordered_map>
 #include <exception>
-
 #include <variant>
 
 #include "AST.hpp"
@@ -108,11 +107,6 @@ namespace Types {
                 }
             }
             return res;
-        }
-
-        type type_of(const AST::expr& e) {
-            e->accept(*this);
-            return result;
         }
 
         void unify(const type& lhs, const type& rhs, const AST::Expr* ctx=nullptr) {
@@ -277,4 +271,6 @@ namespace Types {
             result = ty_on_t;
         }
     };
+
+    type typecheck(const AST::expr& e);
 }

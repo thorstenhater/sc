@@ -5,53 +5,36 @@
 
 using namespace AST::convenience;
 
-void compile(const AST::expr e) {
-    auto to_compile = e;
-    auto sexp = AST::ToSExp(std::cout);
-    e->accept(sexp);
+TailCPS::term compile(const AST::expr& to_compile) {
+    std::cout << "\n**************************************************\n";
+    std::cout << "*** Type check ***********************************\n";
+    AST::to_sexp(std::cout, to_compile);
+    auto type = Types::typecheck(to_compile);
     try {
-        auto types = Types::TypeCheck();
-        std::cout << "\n  : " << Types::show_type(types.type_of(e)) << "\n";
-        std::cout << '\n';
+        std::cout << "\n  : " << Types::show_type(type);
     } catch (Types::TypeError& e) {
-        std::cout << "\n  TypeError: " << e.what() << '\n';
+        std::cout << "\n  TypeError: " << e.what();
     }
-    std::cout << "CPS conversion: naive\n";
-    {
-        auto ast_to_cps = CPS::ToCPS();
-        auto cps = ast_to_cps.convert(to_compile);
-        auto cps_to_sexp = CPS::ToSExp(std::cout);
-        cps_to_sexp(cps);
-        std::cout << '\n';
-    }
-    std::cout << "CPS conversion: improved\n";
-    {
-        auto ast_to_cps = CPS::ToCPSImproved();
-        auto cps = ast_to_cps.convert(to_compile);
-        auto cps_to_sexp = CPS::ToSExp(std::cout);
-        cps_to_sexp(cps);
-        std::cout << '\n';
-    }
-    std::cout << "CPS conversion: tail\n";
-    {
-        auto ast_to_cps = TailCPS::ToCPS();
-        auto cps = ast_to_cps.convert(to_compile);
-        auto cps_to_sexp = TailCPS::ToSExp(std::cout);
-        cps_to_sexp(cps);
-        std::cout << '\n';
-    }
+    std::cout << "\n*** Alpha conversion *****************************\n";
+    auto ast = AST::alpha_convert(to_compile);
+    AST::to_sexp(std::cout, ast);
+    std::cout << "\nCPS conversion: naive\n";
+    auto naive_cps = CPS::ast_to_naive_cps(ast);
+    CPS::cps_to_sexp(std::cout, naive_cps);
+    std::cout << "\nCPS conversion: improved\n";
+    auto cps = CPS::ast_to_cps(ast);
+    CPS::cps_to_sexp(std::cout, cps);
+    std::cout << "\n*** CPS conversion *******************************\n";
+    auto tail_cps = TailCPS::ast_to_cps(ast);
+    TailCPS::cps_to_sexp(std::cout, tail_cps);
+    std::cout << "\n*** Beta expand continuations ********************\n";
+    auto beta_cont = TailCPS::beta_cont(tail_cps);
+    TailCPS::cps_to_sexp(std::cout, beta_cont);
+    std::cout << "\n**************************************************\n";
+    return tail_cps;
 }
 
 int main() {
-    compile("a"_var);
-    compile(42.0_f64);
-    compile(let("a", 42.0_f64, "a"_var));
-    compile(lambda({"a"}, "a"_var));
-    compile(tuple({23.0_f64}));
-    compile(tuple({23.0_f64, 42.0_f64}));
-    compile(tuple({23.0_f64, 42.0_f64, 7.0_f64}));
-    compile(add(23.0_f64, 42.0_f64));
-
     auto Ih_current =
         lambda({"sim", "mech"},
                pi("sim_v", 0, "sim"_var,
@@ -65,7 +48,4 @@ int main() {
                                       ("sim_g"_var + ("mech_gbar"_var * "mech_m"_var)),
                                       tuple({"i_new"_var, "g_new"_var})))))))));
     compile(Ih_current);
-    compile(let("a", 42.0_f64, let("b", "a"_var, "b"_var)));
-    compile(lambda({"x"}, apply("f"_var, {tuple({"x"_var, "y"_var})})));
-    compile(apply("g"_var, {"x"_var}));
 }

@@ -2,9 +2,9 @@
 
 namespace TailCPS {
     namespace convenience {
-        template<typename E, typename... Ts> term make_term(const Ts&... args) { return std::make_shared<E>(E(args...)); }
+        template<typename E, typename... Ts> term make_term(const Ts&... args) { return std::make_shared<Term>(E(args...)); }
         term let(const std::string& n, const value& v, const term& i) { return make_term<LetV>(n, v, i); }
-        term pi(int f, const std::string& n, const std::string& t, const term& i) { return std::make_shared<LetT>(f, n, t, i); }
+        term pi(int f, const std::string& n, const std::string& t, const term& i) { return make_term<LetT>(f, n, t, i); }
         term let_cont(const std::string& n, const std::vector<variable>& as, const term& b, const term& i) { return make_term<LetC>(n, as, b, i); }
         term let_func(const std::string& n, const std::string& c, const std::vector<variable>& as, const term& b, const term& i) { return make_term<LetF>(n, c, as, b, i); }
         term app_cont(const std::string& n, const std::string& a) { return make_term<AppC>(n, a); }
@@ -12,7 +12,7 @@ namespace TailCPS {
         term app_prim(const std::string& n, const std::string& c, const std::string& a) { return make_term<AppP>(n, c, a); }
         term halt(const variable& v) { return make_term<Halt>(v); }
 
-        template<typename E, typename... Ts> value make_value(const Ts&... args) { return std::make_shared<E>(E(args...)); }
+        template<typename E, typename... Ts> value make_value(const Ts&... args) { return std::make_shared<Value>(E(args...)); }
         value f64(double v) { return make_value<F64>(v); }
         value boolean(bool v) { return make_value<Bool>(v); }
         value tuple(const std::vector<variable>& fs) { return make_value<Tuple>(fs); }
@@ -121,5 +121,26 @@ namespace TailCPS {
         e.val->accept(*this);
         auto in = result;
         result = let_cont(j, {x}, body, in);
+    }
+
+    term ast_to_cps(const AST::expr& e) {
+        auto to_cps = ToCPS();
+        e->accept(to_cps);
+        return to_cps.result;
+    }
+
+    void cps_to_sexp(std::ostream& os, const term& t) {
+        ToSExp to_sexp(os);
+        std::visit(to_sexp, *t);
+    }
+
+    term substitute(const term& t, const std::unordered_map<variable, variable>& mapping) {
+        auto subst = Substitute(mapping);
+        return  std::visit(subst, *t);
+    }
+
+    term beta_cont(const term& t) {
+        auto beta = BetaCont();
+        return  std::visit(beta, *t);
     }
 }

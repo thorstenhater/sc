@@ -45,6 +45,7 @@ namespace CPS {
 
     // Variables
     using variable = std::string;
+    variable genvar();
 
     // Values
     struct Value {
@@ -289,14 +290,8 @@ namespace CPS {
         ToCPS(): counter{0} {}
 
         term result;
-        std::string genvar();
 
         size_t counter;
-
-        term convert(const AST::expr& e) {
-            e->accept(*this);
-            return result;
-        }
 
         virtual void visit(const AST::F64& e) override {
             auto x = genvar();
@@ -402,8 +397,6 @@ namespace CPS {
         variable ctx;
         ToCPSImprovedHelper(ToCPSImproved&p): parent{p} {}
 
-        std::string genvar();
-
         virtual void visit(const AST::F64&)   override;
         virtual void visit(const AST::Bool&)  override;
         virtual void visit(const AST::Let&)   override;
@@ -443,4 +436,8 @@ namespace CPS {
             result = let(f, lambda(k, x, body), ctx(f));
         }
     };
+
+    term ast_to_cps(const AST::expr&);
+    term ast_to_naive_cps(const AST::expr&);
+    void cps_to_sexp(std::ostream&, const term&);
 }
