@@ -27,8 +27,10 @@ namespace AST {
         void AlphaConvert::visit(const Bool& e) { result = std::make_shared<Bool>(e); }
         void AlphaConvert::visit(const Prim& e)  {
                 auto tmp = std::make_shared<Prim>(e);
-                tmp->args->accept(*this);
-                tmp->args = result;
+                for (auto& arg: tmp->args) {
+                        arg->accept(*this);
+                        arg = result;
+                }
                 result = tmp;
         }
         void AlphaConvert::visit(const Tuple& e) {
@@ -79,8 +81,10 @@ namespace AST {
                 auto tmp = std::make_shared<App>(e);
                 tmp->fun->accept(*this);
                 tmp->fun = result;
-                tmp->args->accept(*this);
-                tmp->args = result;
+                for (auto& arg: tmp->args) {
+                        arg->accept(*this);
+                        arg = result;
+                }
                 result = tmp;
         }
         void AlphaConvert::visit(const Cond& e) {
@@ -126,4 +130,20 @@ namespace AST {
                 expr operator +(const expr& l, const expr& r) { return add(l, r); }
                 expr operator -(const expr& l, const expr& r) { return sub(l, r); }
         }
+        type typecheck(const expr& e) {
+                auto types = TypeCheck();
+                e->accept(types);
+                return types.result;
+        }
+        void type_error(const std::string& m, const AST::Expr* ctx) {
+                std::stringstream ss;
+                ss << m;
+                if (ctx) {
+                        ss << "\n";
+                        auto sexp = AST::ToSExp(ss, 2, "  |");
+                        ctx->accept(sexp);
+                }
+                throw TypeError{ss.str()};
+        }
+
 }

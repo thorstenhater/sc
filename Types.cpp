@@ -1,17 +1,6 @@
 #include "Types.hpp"
 
 namespace Types {
-    void type_error(const std::string& m, const AST::Expr* ctx) {
-        std::stringstream ss;
-        ss << m;
-        if (ctx) {
-            ss << "\n";
-            auto sexp = AST::ToSExp(ss, 2, "  |");
-            ctx->accept(sexp);
-        }
-        throw TypeError{ss.str()};
-    }
-
     std::string show_type(const type& t) {
         struct ShowType {
             std::string operator()(const TyFunc& e) {
@@ -74,10 +63,4 @@ namespace Types {
     bool operator==(const TyBool&, const TyBool&) { return true; }
     bool operator==(const TyF64&, const TyF64&) { return true; }
     bool operator==(const TyVar& lhs, const TyVar& rhs) { return lhs.name == rhs.name; }
-
-    type typecheck(const AST::expr& e) {
-        auto types = Types::TypeCheck();
-        e->accept(types);
-        return types.result;
-    }
 }
