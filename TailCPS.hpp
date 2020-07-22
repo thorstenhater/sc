@@ -46,19 +46,19 @@ namespace TailCPS {
                                   Halt>;
     using term     = std::shared_ptr<Term>;
 
-    struct Tuple  {
+    struct Tuple: Types::Typed {
         std::vector<variable> fields;
-        Tuple(const std::vector<std::string>& fs): fields{fs} {}
+        Tuple(const std::vector<std::string>& fs, const Types::type& t=nullptr): fields{fs}, Typed{t} {}
     };
 
-    struct F64 {
+    struct F64: Types::Typed {
         double value;
-        F64(double v): value{v} { }
+        F64(double v): value{v}, Typed{Types::f64_t()} { }
     };
 
-    struct Bool {
+    struct Bool: Types::Typed {
         bool value;
-        Bool(bool v): value{v} { }
+        Bool(bool v): value{v}, Typed{Types::bool_t()} { }
     };
 
     struct Halt {
@@ -66,34 +66,33 @@ namespace TailCPS {
         Halt(const std::string&n): name{n} {}
     };
 
-    struct LetV {
+    struct LetV: Types::Typed {
         variable name;
         term in;
         value val;
         LetV(const std::string& n, const value& v, const term& i): name{n}, in{i}, val{v} {}
     };
 
-    // Tuple projection
-    struct LetT {
+    struct LetT: Types::Typed {
         variable name;
         term in;
         int field;
         variable tuple;
-        virtual ~LetT() = default;
         LetT(int f, const std::string& n, const std::string& t, const term& i): name{n}, in{i}, field{f}, tuple{t} {}
     };
 
-    struct LetF {
+    struct LetF: Types::Typed {
         variable name;
         term in;
         variable cont;
         std::vector<variable> args;
         term body;
-        LetF(const std::string& n, const std::string& c, const std::vector<variable>& as, const term& b, const term& i): name{n}, in{i}, cont{c}, args{as}, body{b} {}
+        LetF(const std::string& n, const std::string& c, const std::vector<variable>& as,
+             const term& b, const term& i,
+             const Types::type& t=nullptr): name{n}, in{i}, cont{c}, args{as}, body{b}, Typed{t} {}
     };
 
-    // Local continuation
-    struct LetC {
+    struct LetC: Types::Typed {
         variable name;
         term in;
         std::vector<variable> args;
@@ -101,27 +100,25 @@ namespace TailCPS {
         LetC(const std::string& n, const std::vector<variable>& as, const term& b, const term& i): name{n}, in{i}, args{as}, body{b} {}
     };
 
-    // Apply Continuation c a0 a1 ...
-    struct AppC {
+    struct AppC: Types::Typed {
         variable name;
         variable arg;
         AppC(const std::string& n, const variable& a): name{n}, arg{a} {}
     };
 
-    // Apply function f c a0 a1 ...
-    struct AppF {
+    struct AppF: Types::Typed {
         variable name;
         variable cont;
         std::vector<variable> args;
         AppF(const std::string& f, const std::string& c, const std::vector<variable>& as): name{f}, cont{c}, args{as} {}
     };
 
-    struct LetP {
+    struct LetP: Types::Typed {
         variable name;
         variable var;
         std::vector<variable> args;
         term in;
-        LetP(const std::string& f, const std::string& v, const std::vector<variable>& a, const term& i): name{f}, var{v}, args{a}, in{i} {}
+        LetP(const std::string& f, const std::string& v, const std::vector<variable>& a, const term& i, const Types::type& t=nullptr): name{f}, var{v}, args{a}, in{i}, Typed{t} {}
     };
 
     namespace convenience {
@@ -129,8 +126,8 @@ namespace TailCPS {
         term let(const std::string& n, const value& v, const term& i);
         term pi(int f, const std::string& n, const std::string& t, const term& i);
         term let_cont(const std::string& n, const std::vector<variable>& as, const term& b, const term& i);
-        term let_func(const std::string& n, const std::string& c, const std::vector<variable>& as, const term& b, const term& i);
-        term let_prim(const std::string&, const std::string&, const std::vector<std::string>&, const term&);
+        term let_func(const std::string& n, const std::string& c, const std::vector<variable>& as, const term& b, const term& i, const Types::type& t=nullptr);
+        term let_prim(const std::string&, const std::string&, const std::vector<std::string>&, const term&, const Types::type& t=nullptr);
         term app_cont(const std::string& n, const std::string& a);
         term app_func(const std::string& n, const std::string& c, const std::vector<std::string>& a);
         term halt(const variable& v);
@@ -138,7 +135,7 @@ namespace TailCPS {
         template<typename E, typename... Ts> value make_value(const Ts&... args);
         value f64(double v);
         value boolean(bool v);
-        value tuple(const std::vector<variable>& fs);
+        value tuple(const std::vector<variable>& fs, const Types::type& t=nullptr);
     }
 
     using namespace convenience;
@@ -218,8 +215,12 @@ namespace TailCPS {
                << e.name
                << " ";
             for (const auto& arg: e.args) os << arg << " ";
+            os << ")";
+            if (e.type) {
+                os << ": " << Types::show_type(e.type);
+            }
             indent += 4;
-            os << ")\n" << prefix << std::string(indent, ' ');
+            os << '\n' << prefix << std::string(indent, ' ');
             std::visit(*this, *e.in);
             os << ")";
             indent -= 4;
@@ -231,8 +232,12 @@ namespace TailCPS {
                << e.cont
                << " (";
             for (const auto& arg: e.args) os << arg << " ";
+            os << ")";
+            if (e.type) {
+                os << ": " << Types::show_type(e.type);
+            }
             indent += 4;
-            os << ")\n" << prefix << std::string(indent, ' ') << ";; function";
+            os << '\n' << prefix << std::string(indent, ' ') << ";; function";
             os << "\n" << prefix << std::string(indent, ' ');
             std::visit(*this, *e.body);
             os << "\n" << prefix << std::string(indent, ' ') << ";; in";
@@ -246,9 +251,15 @@ namespace TailCPS {
             os << "(";
             for (const auto& field: v.fields) os << field << ", ";
             os << ")";
+            if (v.type) {
+                os << ": " << Types::show_type(v.type);
+            }
         };
         void operator()(const F64& v) {
             os << v.value;
+            if (v.type) {
+                os << ": " << Types::show_type(v.type);
+            }
         };
         void operator()(const Bool& v) {
             os << v.value;
@@ -257,7 +268,7 @@ namespace TailCPS {
 
     struct ToCPS;
 
-    struct ToCPSHelper: AST::Visitor {
+    struct ToCPSHelper {
         ToCPS& parent;
         term result;
         variable ctx;
@@ -265,24 +276,23 @@ namespace TailCPS {
 
         std::string genvar();
 
-        virtual void visit(const AST::F64&)   override;
-        virtual void visit(const AST::Bool&)  override;
-        virtual void visit(const AST::Let&)   override;
-        virtual void visit(const AST::Var&)   override;
-        virtual void visit(const AST::Proj&)  override;
-        virtual void visit(const AST::App&)   override;
-        virtual void visit(const AST::Lam&)   override;
-        virtual void visit(const AST::Tuple&) override;
-        virtual void visit(const AST::Prim&)  override;
-
-        virtual void visit(const AST::Cond&)  override {}
+        void operator()(const AST::F64&);
+        void operator()(const AST::Bool&);
+        void operator()(const AST::Let&);
+        void operator()(const AST::Var&);
+        void operator()(const AST::Proj&);
+        void operator()(const AST::App&);
+        void operator()(const AST::Lam&);
+        void operator()(const AST::Tuple&);
+        void operator()(const AST::Prim&);
+        void operator()(const AST::Cond&)  {}
 
         void app_helper(const std::vector<AST::expr>&, size_t, const variable&, std::vector<variable>&, const variable&, const variable&);
-        void tuple_helper(const std::vector<AST::expr>&, size_t, const variable&, std::vector<variable>&, const variable&);
-        void prim_helper(const std::vector<AST::expr>& args, size_t ix, std::vector<variable>& ys, const variable& op, const variable& kappa);
+        void tuple_helper(const std::vector<AST::expr>&, size_t, const variable&, std::vector<variable>&, const variable&, const Types::type&);
+        void prim_helper(const std::vector<AST::expr>& args, size_t ix, std::vector<variable>& ys, const variable& op, const variable& kappa, const Types::type& t);
     };
 
-    struct ToCPS: AST::Visitor {
+    struct ToCPS {
         size_t counter;
         ToCPSHelper helper;
 
@@ -296,11 +306,11 @@ namespace TailCPS {
         std::string genvar();
 
         term convert(const AST::expr& e) {
-            e->accept(*this);
+            std::visit(*this, *e);
             return result;
         }
 
-        virtual void visit(const AST::Var& e) override {
+        void operator()(const AST::Var& e) {
             result = ctx(e.name);
         }
         template<typename K>
@@ -317,10 +327,10 @@ namespace TailCPS {
                 }
                 return result;
             };
-            args[ix]->accept(*this);
+            std::visit(*this, *args[ix]);
             ctx = tmp;
         }
-        virtual void visit(const AST::App& e) override {
+        void operator()(const AST::App& e) {
             auto kappa = ctx;
             auto zs = genvar();
             std::vector<variable> ys{};
@@ -328,88 +338,87 @@ namespace TailCPS {
                 app_helper(e.args, 0, zs, ys, y, kappa);
                 return result;
             };
-            e.fun->accept(*this);
+            std::visit(*this, *e.fun);
             ctx = kappa;
         }
 
         template<typename K>
-        void prim_helper(const std::vector<AST::expr>& args, size_t ix, std::vector<variable>& ys, const variable& op, K& kappa) {
+        void prim_helper(const std::vector<AST::expr>& args, size_t ix, std::vector<variable>& ys, const variable& op, K& kappa, const Types::type& t) {
             auto tmp = ctx;
             ctx = [&](auto y) {
                 ys.push_back(y);
                 if (ix + 1 == args.size()) {
                     auto n = genvar();
-                    result = let_prim(op, n, ys, kappa(n));
+                    result = let_prim(op, n, ys, kappa(n), t);
                 } else {
-                    prim_helper(args, ix + 1, ys, op, kappa);
+                    prim_helper(args, ix + 1, ys, op, kappa, t);
                 }
                 return result;
             };
-            args[ix]->accept(*this);
+            std::visit(*this, *args[ix]);
             ctx = tmp;
         }
-        virtual void visit(const AST::Prim& e) override {
-            std::cout << "Visiting PrimOp " << e.op << "\n";
+        void operator()(const AST::Prim& e) {
             auto kappa = ctx;
             std::vector<variable> ys = {};
-            prim_helper(e.args, 0, ys, e.op, kappa);
+            prim_helper(e.args, 0, ys, e.op, kappa, e.type);
             ctx = kappa;
         }
-        virtual void visit(const AST::Lam& e) override {
+        void operator()(const AST::Lam& e) {
             auto f = genvar();
             auto k = genvar();
             auto x = e.args;
             helper.ctx = k;
-            e.body->accept(helper);
+            std::visit(helper, *e.body);
             auto body = helper.result;
-            result = let_func(f, k, x, body, ctx(f));
+            result = let_func(f, k, x, body, ctx(f), e.type);
         }
         template<typename K>
-        void tuple_helper(const std::vector<AST::expr>& fields, size_t ix, const variable& x, std::vector<variable>& xs, K& kappa) {
+        void tuple_helper(const std::vector<AST::expr>& fields, size_t ix, const variable& x, std::vector<variable>& xs, K& kappa, const Types::type& t) {
             auto tmp = ctx;
             ctx = [&](auto z1) {
                 xs.push_back(z1);
                 if (ix + 1 == fields.size()) {
-                    result = let(x, tuple(xs), kappa(x));
+                    result = let(x, tuple(xs, t), kappa(x));
                 } else {
-                    tuple_helper(fields, ix + 1, x, xs, kappa);
+                    tuple_helper(fields, ix + 1, x, xs, kappa, t);
                 }
                 return result;
             };
-            fields[ix]->accept(*this);
+            std::visit(*this, *fields[ix]);
             ctx = tmp;
         }
-        virtual void visit(const AST::Tuple& e) override {
+        void operator()(const AST::Tuple& e) {
             auto kappa = ctx;
             auto x = genvar();
             std::vector<variable> xs{};
-            tuple_helper(e.fields, 0, x, xs, kappa);
+            tuple_helper(e.fields, 0, x, xs, kappa, e.type);
         }
-        virtual void visit(const AST::F64& e) override {
+        void operator()(const AST::F64& e) {
             auto x = genvar();
             result = let(x, f64(e.val), ctx(x));
         }
-        virtual void visit(const AST::Bool& e)  override {
+        void operator()(const AST::Bool& e)  {
             auto x = genvar();
             result = let(x, boolean(e.val), ctx(x));
         }
-        virtual void visit(const AST::Proj& e)  override {
+        void operator()(const AST::Proj& e)  {
             auto kappa = ctx;
             auto x = genvar();
             ctx = [&](auto z) { return pi(e.field, x, z, kappa(x)); };
-            e.tuple->accept(*this);
+            std::visit(*this, *e.tuple);
             ctx = kappa;
         }
-        virtual void visit(const AST::Let& e) override {
-            e.body->accept(*this);
+        void operator()(const AST::Let& e) {
+            std::visit(*this, *e.body);
             auto cont = result;
             auto j = genvar();
             helper.ctx = j;
-            e.val->accept(helper);
+            std::visit(helper, *e.val);
             auto body = helper.result;
             result = let_cont(j, {e.var}, cont, body);
         }
-        virtual void visit(const AST::Cond&)  override {}
+        void operator()(const AST::Cond&) {}
     };
 
     term ast_to_cps(const AST::expr&);
@@ -517,11 +526,7 @@ namespace TailCPS {
                 auto args =  continuations[e.name].first;
                 auto body = *continuations[e.name].second;
                 auto subst = std::unordered_map<variable, variable>{};
-                if (args.size() > 1) {
-                    std::cout << "Please fix continuations to have more than one argument" << '\n';
-                    exit(42);
-                }
-                std::cout << "Substituting in " << e.name << ": " << args[0] << " -> " << e.arg << '\n';
+                if (args.size() > 1) { throw std::runtime_error("Please fix continuations to have more than one argument"); }
                 subst[args[0]] = e.arg;
                 auto res = std::make_shared<Term>(body);
                 return substitute(res, subst);
@@ -649,7 +654,7 @@ namespace TailCPS {
         term operator()(const Halt& e) { return std::make_shared<Term>(e); }
     };
 
-    term dead_let(std::unordered_set<variable> live, const term& t);
+    term dead_let(const term& t);
 
     struct BetaFunc {
         std::unordered_map<variable, std::pair<std::vector<variable>, term>> functions;
@@ -690,13 +695,11 @@ namespace TailCPS {
             if (functions.find(e.name) == functions.end()) {
                 return std::make_shared<Term>(e);
             } else {
-                std::cout << "  + " << e.name  << '\n';
                 auto args =  functions[e.name].first;
                 auto body = *functions[e.name].second;
                 auto subst = std::unordered_map<variable, variable>{};
                 for (auto ix = 0; ix < args.size(); ix++) {
                     subst[args[ix]] = e.args[ix];
-                    std::cout << "    - " << args[ix] << " -> " << e.args[ix] << '\n';
                 }
                 auto res = std::make_shared<Term>(body);
                 return substitute(res, subst);
@@ -728,10 +731,8 @@ namespace TailCPS {
             std::string key = e.name;
             for (const auto& arg: e.args) { key += ":" + arg; }
             if (seen.find(key) != seen.end()) {
-                std::cout << "Found prim op with key: " << key << " -> " << seen[key] << '\n';
                 replace[e.var] = seen[key];
             } else {
-                std::cout << "Adding prim op with key: " << key << " -> " << seen[key] << '\n';
                 seen[key] = e.var;
             }
             std::visit(*this, *e.in);
@@ -750,21 +751,22 @@ namespace TailCPS {
 
     struct GenCXX {
         std::string ret = "";
+        int indent = 0;
         std::vector<std::string> code;
         void operator()(const LetV& e) {
             auto value = std::visit(*this, *e.val);
             std::string line = "const auto " + e.name + " = " + value + ";";
-            code.push_back(line);
+            code.push_back(std::string(indent, ' ') + line);
             std::visit(*this, *e.in);
         }
         void operator()(const LetC& e) {
-            code.push_back("// def continuation " + e.name);
+            code.push_back(std::string(indent, ' ') + "// def continuation " + e.name);
             std::visit(*this, *e.body);
             std::visit(*this, *e.in);
         }
         void operator()(const LetT& e) {
             std::string line = "const auto " + e.name + " = std::get<" + std::to_string(e.field) + ">(" + e.tuple + ");";
-            code.push_back(line);
+            code.push_back(std::string(indent, ' ') + line);
             std::visit(*this, *e.in);
         }
         void operator()(const LetP& e) {
@@ -772,38 +774,52 @@ namespace TailCPS {
             if ((e.name == "+") || (e.name == "-") || (e.name == "*")) {
                 line += e.args[0] + " " + e.name + " " + e.args[1] + ";";
             }
-            code.push_back(line);
+            code.push_back(std::string(indent, ' ') + line);
             std::visit(*this, *e.in);
         }
         void operator()(const LetF& e) {
             auto tmp = ret;
             ret = e.cont;
-            std::string line = "auto " + e.name + "(";
-            for (const auto& arg: e.args) line += "const auto& " + arg + ", ";
+
+            auto res_t = "auto"s;
+            std::string line = e.name + "(";
+            if (e.type) {
+                auto fun_t = std::get<Types::TyFunc>(*e.type);
+                for (auto ix = 0ul; ix < fun_t.args.size(); ++ix) {
+                    line += std::visit(*this, *fun_t.args[ix]) + " " + e.args[ix] + ", ";
+                }
+                res_t = std::visit(*this, *fun_t.result);
+            } else {
+                for (auto ix = 0ul; ix < e.args.size(); ++ix) {
+                    line += "auto"s + " " + e.args[ix] + ", ";
+                }
+            }
             if (line.back() == ' ') {
                 line.pop_back();
                 line.pop_back();
             }
             line += ") {";
-            code.push_back(line);
+            code.push_back(std::string(indent, ' ') + res_t + " " + line);
+            indent += 4;
             std::visit(*this, *e.body);
-            code.push_back("}");
+            indent -= 4;
+            code.push_back(std::string(indent, ' ') + "}");
             ret = tmp;
             std::visit(*this, *e.in);
         }
         void operator()(const AppC& e) {
             if (e.name == ret) {
-                code.push_back("return " + e.arg + ";");
+                code.push_back(std::string(indent, ' ') + "return " + e.arg + ";");
                 ret = "";
             } else {
-                code.push_back("// continuation " + e.name);
+                code.push_back(std::string(indent, ' ') + "// continuation " + e.name);
             }
         }
         void operator()(const AppF& e) {
-            code.push_back("// function " + e.name);
+            code.push_back(std::string(indent, ' ') + "// function " + e.name);
         }
         void operator()(const Halt& e) {
-            code.push_back("// HALT " + e.name);
+            code.push_back(std::string(indent, ' ') + "// HALT " + e.name);
         }
         std::string operator()(const F64& v) {
             return std::to_string(v.value);
@@ -812,19 +828,44 @@ namespace TailCPS {
             return std::to_string(v.value);
         }
         std::string operator()(const Tuple& v) {
-            std::string tup = "std::tuple<";
             std::string res = "{";
             for (const auto& field: v.fields) {
                 res += field + ", ";
-                tup += "auto"s + ", ";
             }
-            if (tup.back() == ' ') {
-                tup.pop_back();
-                tup.pop_back();
+            if (res.back() == ' ') {
+                res.pop_back();
+                res.pop_back();
             }
-            tup += ">";
             res += "}";
+            auto tup = "auto"s;
+            if (v.type) {
+                tup = std::visit(*this, *v.type);
+            }
             return tup + res;
+        }
+        std::string operator()(const Types::TyF64&) { return "double"; }
+        std::string operator()(const Types::TyBool&) { return "bool"; }
+        std::string operator()(const Types::TyTuple& t) {
+            std::string res = "std::tuple<";
+            for (const auto& type: t.field_types) {
+                res += std::visit(*this, *type);
+                res += ", ";
+            }
+            if (res.back() == ' ') {
+                res.pop_back();
+                res.pop_back();
+            }
+            res += ">";
+            return res;
+        }
+        std::string operator()(const Types::TyFunc& t) {
+            return "FUNC";
+        }
+        std::string operator()(const Types::TyVar& v) {
+            if (v.alias) {
+                return std::visit(*this, *v.alias);
+            }
+            return "auto";
         }
     };
 

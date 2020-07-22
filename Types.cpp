@@ -29,8 +29,11 @@ namespace Types {
             std::string operator()(const TyF64&)  { return "F64"; }
             std::string operator()(const TyBool&) { return "Bool"; }
         };
-        auto show = ShowType();
-        return std::visit(show, *t);
+        if (!t) {
+            return "UNKNOWN";
+        } else {
+            return std::visit(ShowType(), *t);
+        }
     }
 
 

@@ -2,51 +2,57 @@
 #include "Types.hpp"
 #include "TailCPS.hpp"
 
-using namespace AST::convenience;
+using namespace AST;
 
 void compile(const AST::expr& to_compile) {
     std::cout << "\n**************************************************\n";
     std::cout << "*** Type check ***********************************\n";
-    AST::to_sexp(std::cout, to_compile);
-    auto type = AST::typecheck(to_compile);
-    try {
-        std::cout << "\n  : " << Types::show_type(type);
-    } catch (Types::TypeError& e) {
-        std::cout << "\n  TypeError: " << e.what();
-    }
+    auto typed = AST::typecheck(to_compile);
+    AST::to_sexp(std::cout, typed);
     std::cout << "\n*** Alpha conversion *****************************\n";
-    auto ast = AST::alpha_convert(to_compile);
+    auto ast = AST::alpha_convert(typed);
     AST::to_sexp(std::cout, ast);
     std::cout << "\n*** CPS conversion *******************************\n";
     auto tail_cps = TailCPS::ast_to_cps(ast);
     TailCPS::cps_to_sexp(std::cout, tail_cps);
+    std::cout << "\n*** Dead Code ************************************\n";
+    auto dead_code = dead_let(tail_cps);
+    TailCPS::cps_to_sexp(std::cout, dead_code);
     std::cout << "\n*** Beta expand continuations ********************\n";
-    auto beta_cont = TailCPS::beta_cont(tail_cps);
+    auto beta_cont = TailCPS::beta_cont(dead_code);
     TailCPS::cps_to_sexp(std::cout, beta_cont);
-    std::cout << "\n*** Dead continuations ***************************\n";
-    std::cout << "Live:\n";
-    auto live_after_beta_cont = used_symbols(beta_cont);
-    for (const auto& cont: live_after_beta_cont) std::cout << "  - " << cont << '\n';
-    std::cout << "\n";
-    auto dead_conts = dead_let(live_after_beta_cont, beta_cont);
-    TailCPS::cps_to_sexp(std::cout, dead_conts);
     std::cout << "\n*** Beta expand functions ********************\n";
-    auto beta_func = TailCPS::beta_func(dead_conts);
+    auto beta_func = TailCPS::beta_func(beta_cont);
     TailCPS::cps_to_sexp(std::cout, beta_func);
-    std::cout << "\n*** Dead functions ****************************\n";
-    std::cout << "Live:\n";
-    auto live_funcs = used_symbols(beta_func);
-    for (const auto& func: live_funcs) std::cout << "  - " << func << '\n';
-    std::cout << "\n";
-    auto dead_funcs = dead_let(live_funcs, beta_func);
-    TailCPS::cps_to_sexp(std::cout, dead_funcs);
     std::cout << "\n*** PrimOp CSE ***********************************\n";
-    auto after_prim_cse = prim_cse(dead_funcs);
+    auto after_prim_cse = prim_cse(beta_func);
     TailCPS::cps_to_sexp(std::cout, after_prim_cse);
     std::cout << "\n*** Generate CXX *********************************\n";
     generate_cxx(std::cout, after_prim_cse);
     std::cout << "\n**************************************************\n";
 }
+
+
+/*
+SAM's high-level
+(def-struct state ((m : real))
+(def-struct param ((g0 : real) (erev : real))
+(def-mech
+    :name 'Ih
+    :state state     ; a struct-of-real-type goes here
+    :param param     ; ditto
+    :current         ; a lambda with signature (-> param state cell (dictionary symbol current-contrib))
+        (lambda ((p : param) (s : state) (c : cell))
+            (('leak , (current-contrib (* (- c.v p.erev) p.g0 s.m) (* p.g0 s.m))))))
+
+NORA's suggestion
+sim_input = (v:range, dt:range, i:range, g:range)
+sim_output = (i:range, g:range)
+mech_state = (m:range, gbar:range, ehcn:global)
+def current mech:mech_state sim:sim_input =
+   let* ((i_new (add sim.i (mul (mul mech.gbar mech.m) (sub sim.v mech.ehcn))))) (g_new (add sim.g (mul mech.gbar mech.m))) )
+   in (create sim_output(i_new, g_new))
+*/
 
 int main() {
     auto Ih_current =
@@ -64,8 +70,7 @@ int main() {
                                          tuple({"i_new"_var, "g_new"_var}))))))))));
     compile(Ih_current);
     compile(let("f", lambda({"x"}, "x"_var + "x"_var), apply("f"_var, {42.0_f64})));
-    compile(project(2, "tuple"_var));
-    compile(1.0_f64 + 2.0_f64);
-    compile(let("a", 42.0_f64, let("b", "a"_var, "b"_var)));
-    compile(let("f", lambda({"y"}, "y"_var + "y"_var), let("a", apply("f"_var, {1.0_f64}), "a"_var)));
+    // compile(let("a", 42.0_f64, let("b", "a"_var, "b"_var)));
+    compile(let("a", 42.0_f64, "a"_var));
+    // compile(let("f", lambda({"y"}, "y"_var + "y"_var), let("a", apply("f"_var, {1.0_f64}), "a"_var)));
 }

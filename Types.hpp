@@ -34,6 +34,11 @@ namespace Types {
                               TyVar>;
     using type = std::shared_ptr<Type>;
 
+    struct Typed {
+        Types::type type;
+        Typed(): type{nullptr} {}
+        Typed(const Types::type& t): type{t} {}
+    };
 
     struct TyFunc {
         std::vector<type> args;

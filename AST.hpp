@@ -27,190 +27,150 @@ namespace AST {
     struct Let;
     struct Cond;
 
-    struct Visitor {
-        virtual void visit(const F64&)   = 0;
-        virtual void visit(const Prim&)   = 0;
-        virtual void visit(const Tuple&) = 0;
-        virtual void visit(const Proj&)  = 0;
-        virtual void visit(const Var&)   = 0;
-        virtual void visit(const Let&)   = 0;
-        virtual void visit(const Lam&)   = 0;
-        virtual void visit(const App&)   = 0;
-        virtual void visit(const Bool&)  = 0;
-        virtual void visit(const Cond&)  = 0;
-    };
-
-    struct Expr {
-        virtual void accept(Visitor&) const {};
-    };
-
+    using Expr = std::variant<F64,
+                              Bool,
+                              Tuple,
+                              Proj,
+                              Var,
+                              App,
+                              Lam,
+                              Prim,
+                              Let,
+                              Cond>;
     using expr = std::shared_ptr<Expr>;
 
-    struct F64: Expr {
+    struct F64: Types::Typed {
         const double val;
-        virtual ~F64() = default;
         F64(double v): val{v} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); }
     };
 
-    struct Bool: Expr {
+    struct Bool: Types::Typed {
         const bool val;
-        virtual ~Bool() = default;
         Bool(bool v): val{v} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); }
     };
 
-    struct Proj: Expr {
+    struct Proj: Types::Typed {
         expr tuple;
         size_t field;
-        virtual ~Proj() = default;
         Proj(const size_t f, const expr& t): tuple{t}, field{f} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); }
     };
 
-    struct Tuple: Expr {
+    struct Tuple: Types::Typed {
         std::vector<expr> fields;
-        virtual ~Tuple() = default;
-        Tuple() = default;
+        Types::type type = nullptr;
         Tuple(const std::vector<expr>& fs): fields{fs} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
-    struct Var: Expr {
-        virtual ~Var() = default;
+    struct Var: Types::Typed {
         std::string name;
-        std::shared_ptr<Types::Type> type = nullptr;
+        Types::type type = nullptr;
         Var(const std::string& n): name{n} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
-    struct App: Expr {
+    struct App: Types::Typed {
         expr fun;
         std::vector<expr> args;
-        virtual ~App() = default;
         App(const expr& f, const std::vector<expr>& as): fun{f}, args{as} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
-    struct Prim: Expr {
+    struct Prim: Types::Typed {
         std::string op;
         std::vector<expr> args;
-        virtual ~Prim() = default;
         Prim(const std::string& o, const std::vector<expr>& as): op{o}, args{as} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
-    struct Lam: Expr {
+    struct Lam: Types::Typed {
         std::vector<std::string> args;
         expr body;
-        virtual ~Lam() = default;
+        Types::type type = nullptr;
         Lam(const std::vector<std::string>& as, const expr& b): args{as}, body{b} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
 
-    struct Let: Expr {
+    struct Let: Types::Typed {
         std::string var;
         expr val;
         expr body;
-        virtual ~Let() = default;
-        Let(const std::string& n, const expr& v, const expr& b): var{n}, val{v}, body{b} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
+        Let(const std::string& n, const expr& v, const expr& b, const Types::type& t): var{n}, val{v}, body{b}, Typed{t} {}
     };
     
-    struct Cond: Expr {
+    struct Cond: Types::Typed {
         expr pred;
         expr on_t;
         expr on_f;
-        virtual ~Cond() = default;
+        Types::type type = nullptr;
         Cond(const expr& p, const expr& t, const expr& f): pred{p}, on_t{t}, on_f{f} {}
-        virtual void accept(Visitor& v) const override { v.visit(*this); };
     };
   
-    struct ToSExp: Visitor {
-        virtual std::string name() { return "to sexp"; }
-
+    struct ToSExp {
         std::ostream& os;
         int indent;
         std::string prefix = "";
 
         ToSExp(std::ostream& os_, int i=0, const std::string& p=""): os{os_}, indent{i}, prefix{p} { os << prefix << std::string(indent, ' '); }
 
-        virtual void visit(const Prim& e) override {
-            os << "("
+        void operator()(const Prim& e)  {
+           os << "("
                << e.op
                << " ";
             for (const auto& arg: e.args) {
-                arg->accept(*this);
+                std::visit(*this, *arg);
                 os << " ";
             }
-            os << ")";
+            os << "): " << Types::show_type(e.type);
         }
-
-        virtual void visit(const Bool& e) override {
-            os << (e.val ? "true" : "false");
-        }
-
-        virtual void visit(const F64& e) override { os << e.val; }
-
-        virtual void visit(const Var& e) override { os << e.name; }
-
-        virtual void visit(const Lam& e) override {
+        void operator()(const Bool& e){ os << (e.val ? "true" : "false")  << ": " << Types::show_type(e.type); }
+        void operator()(const F64& e) { os << e.val  << ": " << Types::show_type(e.type); }
+        void operator()(const Var& e) { os << e.name << ": " << Types::show_type(e.type); }
+        void operator()(const Lam& e) {
             os << "(lambda (";
-            for (const auto& arg: e.args) {
-                os << arg << " ";
-            }
+            for (const auto& arg: e.args) os << arg << " ";
             indent += 4;
-            os << ")\n" << prefix << std::string(indent, ' ');
-            e.body->accept(*this);
+            os << "): " << Types::show_type(e.type) << '\n' << prefix << std::string(indent, ' ');
+            std::visit(*this, *e.body);
             os << ")";
             indent -= 4;
         }
-
-        virtual void visit(const Cond& e) override {
+        void operator()(const Cond& e) {
             os << "(if ";
-            e.pred->accept(*this);
+            std::visit(*this, *e.pred);
             indent += 4;
             os << "\n" << prefix << std::string(indent, ' ');
-            e.on_t->accept(*this);
+            std::visit(*this, *e.on_t);
             os << "\n" << prefix << std::string(indent, ' ');
-            e.on_f->accept(*this);
+            std::visit(*this, *e.on_f);
             os << ")";
             indent -= 4;
         }
-
-        virtual void visit(const Tuple& e) override {
+        void operator()(const Tuple& e) {
             os << "(";
             for (const auto& field: e.fields) {
-                field->accept(*this);
+                std::visit(*this, *field);
                 os << ", ";
             }
             os << ")";
         }
-
-        virtual void visit(const Proj& e) override {
+        void operator()(const Proj& e) {
             os << "(pi-" << e.field << " ";
-            e.tuple->accept(*this);
+            std::visit(*this, *e.tuple);
             os << ")";
         }
-
-        virtual void visit(const App& e) override {
+        void operator()(const App& e) {
             os << "(";
-            e.fun->accept(*this);
+            std::visit(*this, *e.fun);
             os << " ";
             for (const auto& arg: e.args) {
-                arg->accept(*this);
+                std::visit(*this, *arg);
                 os << " ";
             }
             os << ")";
         }
-
-        virtual void visit(const Let& e) override {
+        void operator()(const Let& e) {
             os << "(let (" << e.var << " ";
-            e.val->accept(*this);
+            std::visit(*this, *e.val);
             os << ") ";
             indent += 4;
             os << "\n" << prefix << std::string(indent, ' ');
-            e.body->accept(*this);
+            std::visit(*this, *e.body);
             os << ")";
             indent -= 4;
         }
@@ -220,60 +180,57 @@ namespace AST {
 
     std::string genvar();
 
-    struct AlphaConvert: Visitor {
+    struct AlphaConvert {
         expr result;
         std::vector<std::pair<std::string, std::string>> env;
         void push_env(const std::string&, const std::string&);
         void pop_env();
         std::optional<std::string> find_env(const std::string&);
-        virtual void visit(const F64& e) override;
-        virtual void visit(const Bool& e) override;
-        virtual void visit(const Prim& e) override;
-        virtual void visit(const Tuple& e) override;
-        virtual void visit(const Proj& e) override;
-        virtual void visit(const Var& e) override;
-        virtual void visit(const Let& e) override;
-        virtual void visit(const Lam& e) override;
-        virtual void visit(const App& e) override;
-        virtual void visit(const Cond& e) override;
+        void operator()(const F64& e);
+        void operator()(const Bool& e);
+        void operator()(const Prim& e);
+        void operator()(const Tuple& e);
+        void operator()(const Proj& e);
+        void operator()(const Var& e);
+        void operator()(const Let& e);
+        void operator()(const Lam& e);
+        void operator()(const App& e);
+        void operator()(const Cond& e);
     };
 
     expr alpha_convert(const expr& e);
 
-    namespace convenience {
-        template<typename E, typename... Ts> expr make_expr(const Ts&... args);
-        expr nil();
-        expr yes();
-        expr no();
-        expr tuple(const std::vector<expr>& fs);
-        expr project(size_t i, const expr& f);
-        expr cond(const expr& p, const expr& t, const expr& f);
-        expr f64(double v);
-        expr var(const std::string& n);
-        expr add(const expr& l, const expr& r);
-        expr mul(const expr& l, const expr& r);
-        expr sub(const expr& l, const expr& r);
-        expr lambda(const std::vector<std::string>& args, const expr& body);
-        expr apply(const expr& fun, const std::vector<expr>&& args);
-        expr let(const std::string& var, const expr& bind, const expr& in);
+    template<typename E, typename... Ts> expr make_expr(const Ts&... args);
+    expr boolean(const bool);
+    expr tuple(const std::vector<expr>& fs);
+    expr project(size_t i, const expr& f);
+    expr cond(const expr& p, const expr& t, const expr& f);
+    expr f64(double v);
+    expr var(const std::string& n);
+    expr add(const expr& l, const expr& r);
+    expr mul(const expr& l, const expr& r);
+    expr sub(const expr& l, const expr& r);
+    expr lambda(const std::vector<std::string>& args, const expr& body);
+    expr apply(const expr& fun, const std::vector<expr>&& args);
+    expr let(const std::string& var, const expr& bind, const expr& in, const Types::type& t=nullptr);
 
-        expr pi(const std::string& var, size_t field, const expr& tuple, const expr& in);
-        expr defn(const std::string& name, const std::vector<std::string>& args, const expr& body, const expr& in);
+    expr pi(const std::string& var, size_t field, const expr& tuple, const expr& in);
+    expr defn(const std::string& name, const std::vector<std::string>& args, const expr& body, const expr& in);
 
-        expr operator"" _var(const char* v, size_t);
-        expr operator"" _f64(long double v);
-        expr operator *(const expr& l, const expr& r);
-        expr operator +(const expr& l, const expr& r);
-        expr operator -(const expr& l, const expr& r);
-    }
+    expr operator"" _var(const char* v, size_t);
+    expr operator"" _f64(long double v);
+    expr operator *(const expr& l, const expr& r);
+    expr operator +(const expr& l, const expr& r);
+    expr operator -(const expr& l, const expr& r);
 
-    void type_error(const std::string& m, const Expr* ctx=nullptr);
+    void type_error(const std::string& m, const expr& ctx=nullptr);
+
+    Types::type get_type(const expr& e);
 
     using namespace Types;
-    struct TypeCheck: Visitor {
+    struct TypeCheck {
         std::vector<std::unordered_map<std::string, type>> context;
         std::unordered_map<std::string, type> type_vars;
-        type result;
         size_t ty_var_counter;
 
         TypeCheck(): context({{}}), ty_var_counter{0} {}
@@ -296,7 +253,7 @@ namespace AST {
             return res;
         }
 
-        void unify(const type& lhs, const type& rhs, const Expr* ctx=nullptr) {
+        void unify(const type& lhs, const type& rhs, const expr& ctx=nullptr) {
             auto ty_lhs = solve(lhs);
             auto ty_rhs = solve(rhs);
             if ((*ty_lhs) == (*ty_rhs)) { return; }
@@ -356,83 +313,95 @@ namespace AST {
             type_error("Cannot unify types "s + show_type(ty_lhs) + " and " + show_type(ty_rhs), ctx);
         }
 
-        virtual void visit(Var& e) {
+        expr operator()(const Var& e) {
+            auto tmp = e;
             auto name = e.name;
+            type res = nullptr;
             for (auto ctx = context.rbegin(); ctx != context.rend(); ++ctx) {
                 if (ctx->find(name) != ctx->end()) {
-                    result = (*ctx)[name];
-                    return;
+                    res = (*ctx)[name];
+                    break;
                 }
             }
-            auto ty = genvar_t();
-            context.back()[name] = ty;
-            result = ty;
+            if (!res) {
+                auto ty = genvar_t();
+                context.back()[name] = ty;
+                res = ty;
+            }
+            tmp.type = res;
+            return make_expr<Var>(tmp);
         }
-
-        virtual void visit(const Var& e) { std::cout << "Ooops\n"; }
-
-
-        virtual void visit(const F64&) { result = f64_t(); }
-
-        virtual void visit(const Prim& e) {
+        expr operator()(const F64& e) {
+            auto tmp = e;
+            tmp.type = f64_t();
+            return make_expr<F64>(tmp);
+        }
+        expr operator()(const Prim& e) {
+            auto tmp = e;
             if ((e.op == "*") ||
                 (e.op == "-") ||
                 (e.op == "+")) {
                 if (e.args.size() != 2) { throw std::runtime_error("Arity error: "s + e.op); }
-                for (auto ix = 0ul; ix < e.args.size(); ++ix) {
-                    e.args[ix]->accept(*this);
-                    auto ty_arg = result;
-                    unify(ty_arg, f64_t(), &e);
+                for (auto& arg: tmp.args) {
+                    arg = std::visit(*this, *arg);
+                    unify(get_type(arg), f64_t(), std::make_shared<Expr>(e));
                 }
-                result = f64_t();
-                return;
+                tmp.type = f64_t();
+                return make_expr<Prim>(tmp);
             }
             throw std::runtime_error("Unknow prim op: "s + e.op);
         }
-
-        virtual void visit(const Tuple& e) {
-            auto tmp = std::vector<type>{};
-            for (const auto& field: e.fields) {
-                field->accept(*this);
-                tmp.push_back(result);
+        expr operator()(const Tuple& e) {
+            auto tmp = e;
+            auto fields = std::vector<Types::type>{};
+            for (auto& field: tmp.fields) {
+                field = std::visit(*this, *field);
+                fields.push_back(get_type(field));
             }
-            result = tuple_t(tmp);
+            tmp.type = tuple_t(fields);
+            return make_expr<Tuple>(tmp);
         }
-        virtual void visit(const Proj& e) {
-            e.tuple->accept(*this);
-            auto res = result;
-
+        expr operator()(const Proj& e) {
+            auto tmp = e;
+            tmp.tuple = std::visit(*this, *tmp.tuple);
             auto ty = std::make_shared<Type>(TyTuple{{}, -1});
             auto& tuple_ty = std::get<TyTuple>(*ty);
             for (auto ix = 0ul; ix <= e.field; ++ix) {
                 tuple_ty.field_types.push_back(genvar_t());
             }
-            unify(res, ty, &e);
-            result = tuple_ty.field_types[e.field];
+            unify(get_type(tmp.tuple), ty, std::make_shared<Expr>(e));
+            tmp.type  =tuple_ty.field_types[e.field];
+            return make_expr<Proj>(tmp);
         }
-        virtual void visit(const App& e) {
-            e.fun->accept(*this);
-            auto ty_fun = solve(result);
-            ty_fun = solve(ty_fun);
-            if (std::holds_alternative<TyFunc>(*ty_fun)) {
-                auto func = std::get<TyFunc>(*ty_fun);
-                for (auto ix = 0ul; ix < func.args.size(); ++ix) {
-                    e.args[ix]->accept(*this);
-                    auto ty_arg = result;
-                    unify(func.args[ix], ty_arg);
-                }
-                result = func.result;
-            } else {
-                type_error("IMPOSSIBLE: Must unify with function", &e);
+        expr operator()(const App& e) {
+            auto tmp = e;
+            tmp.fun = std::visit(*this, *tmp.fun);
+            auto ty_fun = get_type(tmp.fun);
+            if (!std::holds_alternative<TyFunc>(*ty_fun)) { type_error("IMPOSSIBLE: Must unify with function", std::make_shared<Expr>(e)); }
+            auto func = std::get<TyFunc>(*ty_fun);
+            for (auto ix = 0ul; ix < func.args.size(); ++ix) {
+                tmp.args[ix] = std::visit(*this, *tmp.args[ix]);
+                auto ty_arg = get_type(tmp.args[ix]);
+                unify(func.args[ix], ty_arg, std::make_shared<Expr>(e));
             }
+            tmp.type = func.result;
+            return make_expr<App>(tmp);
         }
-        virtual void visit(const Let& e) {
-            e.val->accept(*this);
-            context.push_back({{e.var, result}});
-            e.body->accept(*this);
+        expr operator()(const Let& e) {
+            auto tmp = e;
+            tmp.val = std::visit(*this, *tmp.val);
+            auto ty_val = get_type(tmp.val);
+            context.push_back({{e.var, ty_val}});
+            tmp.body = std::visit(*this, *tmp.body);
+            if (e.type) {
+                unify(tmp.type, e.type, std::make_shared<Expr>(e));
+            }
+            tmp.type = get_type(tmp.body);
             context.pop_back();
+            return make_expr<Let>(tmp);
         }
-        virtual void visit(const Lam& e) {
+        expr operator()(const Lam& e) {
+            auto tmp = e;
             context.push_back({});
             auto args = std::vector<type>{};
             for (const auto& arg: e.args) {
@@ -440,26 +409,29 @@ namespace AST {
                 args.push_back(t);
                 context.back()[arg] = t;
              }
-
-            e.body->accept(*this);
-            auto ty_body = result;
-            result = func_t(args, ty_body);
+            tmp.body = std::visit(*this, *e.body);
+            auto ty_body = get_type(tmp.body);
             context.pop_back();
+            tmp.type = func_t(args, ty_body);
+            return make_expr<Lam>(tmp);
         }
-        virtual void visit(const Bool&) { result = bool_t(); }
-        virtual void visit(const Cond& e) {
-            e.pred->accept(*this);
-            auto ty_pred = result;
-            unify(ty_pred, bool_t(), &e);
-            e.on_t->accept(*this);
-            auto ty_on_t = result;
-            e.on_f->accept(*this);
-            auto ty_on_f = result;
-            unify(ty_on_t, ty_on_f, &e);
-            result = ty_on_t;
+        expr operator()(const Bool& e) {
+            auto tmp = e;
+            tmp.type = bool_t();
+            return make_expr<Bool>(e);
+        }
+        expr operator()(const Cond& e) {
+            auto tmp = e;
+            tmp.pred = std::visit(*this, *tmp.pred);
+            auto ty_pred = get_type(tmp.pred);
+            unify(ty_pred, bool_t(), std::make_shared<Expr>(e));
+            tmp.on_t = std::visit(*this, *tmp.on_t);
+            tmp.on_f = std::visit(*this, *tmp.on_f);
+            unify(get_type(tmp.on_t), get_type(tmp.on_f), std::make_shared<Expr>(e));
+            tmp.type = get_type(tmp.on_t);
+            return make_expr<Cond>(tmp);
         }
     };
-
-    type typecheck(const expr& e);
-
+    
+    expr typecheck(const expr& e);
 }
