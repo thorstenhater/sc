@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.18)
+
+include(ExternalProject)
 
 project(SimpleCompiler VERSION 0.0.1 LANGUAGES CXX)
 
@@ -13,7 +15,35 @@ set(CMAKE_CXX_FLAGS "-I/usr/local/opt/llvm/include/c++/v1/")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+add_library(cps STATIC AST.hpp AST.cpp Types.hpp Types.cpp TailCPS.hpp TailCPS.cpp Simplify.hpp)
+
 add_executable(sc main.cpp)
-target_sources(sc PUBLIC AST.hpp AST.cpp)
-target_sources(sc PUBLIC Types.hpp Types.cpp)
-target_sources(sc PUBLIC TailCPS.hpp TailCPS.cpp)
+target_link_libraries(sc PUBLIC cps)
+
+ExternalProject_Add(chibi
+  SOURCE_DIR ${CMAKE_SOURCE_DIR}/chibi-scheme
+  CONFIGURE_COMMAND ""
+  BUILD_COMMAND "make"
+  BUILD_IN_SOURCE ON
+  INSTALL_COMMAND make install)
+
+file(COPY ${CMAKE_SOURCE_DIR}/compiler DESTINATION ${CMAKE_BINARY_DIR})
+
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/interface.cxx
+  COMMAND chibi-ffi ${CMAKE_SOURCE_DIR}/interface.stub
+  COMMAND mv ${CMAKE_SOURCE_DIR}/interface.c ${CMAKE_BINARY_DIR}/interface.cxx)
+
+add_library(interface SHARED ${CMAKE_SOURCE_DIR}/interface.h ${CMAKE_BINARY_DIR}/interface.cxx)
+target_include_directories(interface PUBLIC "/usr/local/include/")
+target_include_directories(interface PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(interface PUBLIC -L/usr/local/lib/ -lchibi-scheme)
+target_link_libraries(interface PUBLIC cps)
+# set_target_properties(interface PROPERTIES LINKER_LANGUAGE CXX)
+
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/interface.cxx
+  COMMAND chibi-ffi ${CMAKE_SOURCE_DIR}/interface.stub
+  COMMAND mv ${CMAKE_SOURCE_DIR}/interface.c ${CMAKE_BINARY_DIR}/interface.cxx)
+
+add_custom_command(TARGET interface
+  POST_BUILD VERBATIM
+  COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:interface>" ${CMAKE_BINARY_DIR}/compiler)

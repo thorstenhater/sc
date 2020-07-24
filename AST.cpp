@@ -74,9 +74,7 @@ namespace AST {
                 std::visit(*this, *tmp.body);
                 tmp.body = result;
                 result = make_expr<Lam>(tmp);
-                for (auto& arg: tmp.args) {
-                        pop_env();
-                }
+                env.erase(env.begin() + env.size() - tmp.args.size(), env.end());
         }
         void AlphaConvert::operator()(const App& e) {
                 auto tmp = e;

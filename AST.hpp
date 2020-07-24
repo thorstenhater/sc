@@ -90,7 +90,7 @@ namespace AST {
         std::string var;
         expr val;
         expr body;
-        Let(const std::string& n, const expr& v, const expr& b, const Types::type& t): var{n}, val{v}, body{b}, Typed{t} {}
+        Let(const std::string& n, const expr& v, const expr& b, const Types::type& t): Typed{t}, var{n}, val{v}, body{b}  {}
     };
     
     struct Cond: Types::Typed {

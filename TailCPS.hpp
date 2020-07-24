@@ -48,17 +48,17 @@ namespace TailCPS {
 
     struct Tuple: Types::Typed {
         std::vector<variable> fields;
-        Tuple(const std::vector<std::string>& fs, const Types::type& t=nullptr): fields{fs}, Typed{t} {}
+        Tuple(const std::vector<std::string>& fs, const Types::type& t=nullptr): Typed{t}, fields{fs} {}
     };
 
     struct F64: Types::Typed {
         double value;
-        F64(double v): value{v}, Typed{Types::f64_t()} { }
+        F64(double v): Typed{Types::f64_t()}, value{v} { }
     };
 
     struct Bool: Types::Typed {
         bool value;
-        Bool(bool v): value{v}, Typed{Types::bool_t()} { }
+        Bool(bool v): Typed{Types::bool_t()}, value{v} { }
     };
 
     struct Halt {
@@ -89,7 +89,7 @@ namespace TailCPS {
         term body;
         LetF(const std::string& n, const std::string& c, const std::vector<variable>& as,
              const term& b, const term& i,
-             const Types::type& t=nullptr): name{n}, in{i}, cont{c}, args{as}, body{b}, Typed{t} {}
+             const Types::type& t=nullptr): Typed{t}, name{n}, in{i}, cont{c}, args{as}, body{b} {}
     };
 
     struct LetC: Types::Typed {
@@ -118,7 +118,7 @@ namespace TailCPS {
         variable var;
         std::vector<variable> args;
         term in;
-        LetP(const std::string& f, const std::string& v, const std::vector<variable>& a, const term& i, const Types::type& t=nullptr): name{f}, var{v}, args{a}, in{i}, Typed{t} {}
+        LetP(const std::string& f, const std::string& v, const std::vector<variable>& a, const term& i, const Types::type& t=nullptr): Typed{t}, name{f}, var{v}, args{a}, in{i} {}
     };
 
     namespace convenience {
@@ -598,6 +598,7 @@ namespace TailCPS {
     std::unordered_set<variable> used_symbols(const term& t);
 
     struct DeadLet {
+        size_t count = 0ul;
         std::unordered_set<variable> live;
         DeadLet(std::unordered_set<variable> l): live{l} {}
 
@@ -607,6 +608,7 @@ namespace TailCPS {
             if (live.find(e.name) != live.end()) {
                 return std::make_shared<Term>(tmp);
             } else {
+                count++;
                 return tmp.in;
             }
         }
@@ -617,6 +619,7 @@ namespace TailCPS {
             if (live.find(e.name) != live.end()) {
                 return std::make_shared<Term>(tmp);
             } else {
+                count++;
                 return tmp.in;
             }
         }
@@ -626,6 +629,7 @@ namespace TailCPS {
             if (live.find(e.name) != live.end()) {
                 return std::make_shared<Term>(tmp);
             } else {
+                count++;
                 return tmp.in;
             }
         }
@@ -635,7 +639,7 @@ namespace TailCPS {
             if (live.find(e.var) != live.end()) {
                 return std::make_shared<Term>(tmp);
             } else {
-                std::cerr << "Dead prim " << e.name << '\n';
+                count++;
                 return tmp.in;
             }
         }
@@ -646,6 +650,7 @@ namespace TailCPS {
             if (live.find(e.name) != live.end()) {
                 return std::make_shared<Term>(tmp);
             } else {
+                count++;
                 return tmp.in;
             }
         }
@@ -698,7 +703,7 @@ namespace TailCPS {
                 auto args =  functions[e.name].first;
                 auto body = *functions[e.name].second;
                 auto subst = std::unordered_map<variable, variable>{};
-                for (auto ix = 0; ix < args.size(); ix++) {
+                for (auto ix = 0ul; ix < args.size(); ix++) {
                     subst[args[ix]] = e.args[ix];
                 }
                 auto res = std::make_shared<Term>(body);
@@ -736,15 +741,14 @@ namespace TailCPS {
                 seen[key] = e.var;
             }
             std::visit(*this, *e.in);
-
         }
         void operator()(const LetF& e) {
             std::visit(*this, *e.body);
             std::visit(*this, *e.in);
         }
-        void operator()(const AppC& e) {}
-        void operator()(const AppF& e) {}
-        void operator()(const Halt& e) {}
+        void operator()(const AppC&) {}
+        void operator()(const AppF&) {}
+        void operator()(const Halt&) {}
     };
 
     term prim_cse(const term& t);
@@ -794,10 +798,7 @@ namespace TailCPS {
                     line += "auto"s + " " + e.args[ix] + ", ";
                 }
             }
-            if (line.back() == ' ') {
-                line.pop_back();
-                line.pop_back();
-            }
+            if (line.back() == ' ') { line.erase(line.begin() + line.size() - 2, line.end()); }
             line += ") {";
             code.push_back(std::string(indent, ' ') + res_t + " " + line);
             indent += 4;
@@ -821,26 +822,17 @@ namespace TailCPS {
         void operator()(const Halt& e) {
             code.push_back(std::string(indent, ' ') + "// HALT " + e.name);
         }
-        std::string operator()(const F64& v) {
-            return std::to_string(v.value);
-        }
-        std::string operator()(const Bool& v) {
-            return std::to_string(v.value);
-        }
+        std::string operator()(const F64& v) { return std::to_string(v.value); }
+        std::string operator()(const Bool& v) { return std::to_string(v.value); }
         std::string operator()(const Tuple& v) {
             std::string res = "{";
             for (const auto& field: v.fields) {
                 res += field + ", ";
             }
-            if (res.back() == ' ') {
-                res.pop_back();
-                res.pop_back();
-            }
+            if (res.back() == ' ') { res.erase(res.begin() + res.size() - 2, res.end()); }
             res += "}";
             auto tup = "auto"s;
-            if (v.type) {
-                tup = std::visit(*this, *v.type);
-            }
+            if (v.type) { tup = std::visit(*this, *v.type); }
             return tup + res;
         }
         std::string operator()(const Types::TyF64&) { return "double"; }
@@ -851,20 +843,13 @@ namespace TailCPS {
                 res += std::visit(*this, *type);
                 res += ", ";
             }
-            if (res.back() == ' ') {
-                res.pop_back();
-                res.pop_back();
-            }
+            if (res.back() == ' ') { res.erase(res.begin() + res.size() - 2, res.end()); }
             res += ">";
             return res;
         }
-        std::string operator()(const Types::TyFunc& t) {
-            return "FUNC";
-        }
+        std::string operator()(const Types::TyFunc&) { throw std::runtime_error("Not implemented"); }
         std::string operator()(const Types::TyVar& v) {
-            if (v.alias) {
-                return std::visit(*this, *v.alias);
-            }
+            if (v.alias) { return std::visit(*this, *v.alias); }
             return "auto";
         }
     };

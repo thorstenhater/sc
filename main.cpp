@@ -1,6 +1,8 @@
 #include "AST.hpp"
 #include "Types.hpp"
 #include "TailCPS.hpp"
+#include "Simplify.hpp"
+#include "interface.h"
 
 using namespace AST;
 
@@ -21,38 +23,21 @@ void compile(const AST::expr& to_compile) {
     std::cout << "\n*** Beta expand continuations ********************\n";
     auto beta_cont = TailCPS::beta_cont(dead_code);
     TailCPS::cps_to_sexp(std::cout, beta_cont);
-    std::cout << "\n*** Beta expand functions ********************\n";
+    std::cout << "\n*** Beta expand functions ************************\n";
     auto beta_func = TailCPS::beta_func(beta_cont);
     TailCPS::cps_to_sexp(std::cout, beta_func);
     std::cout << "\n*** PrimOp CSE ***********************************\n";
     auto after_prim_cse = prim_cse(beta_func);
     TailCPS::cps_to_sexp(std::cout, after_prim_cse);
+    std::cout << "\n*** PrimOp Simplification *************************\n";
+    auto after_prim_simplify = prim_simplify(after_prim_cse);
+    TailCPS::cps_to_sexp(std::cout, after_prim_simplify);
     std::cout << "\n*** Generate CXX *********************************\n";
-    generate_cxx(std::cout, after_prim_cse);
+    generate_cxx(std::cout, after_prim_simplify);
     std::cout << "\n**************************************************\n";
 }
 
 
-/*
-SAM's high-level
-(def-struct state ((m : real))
-(def-struct param ((g0 : real) (erev : real))
-(def-mech
-    :name 'Ih
-    :state state     ; a struct-of-real-type goes here
-    :param param     ; ditto
-    :current         ; a lambda with signature (-> param state cell (dictionary symbol current-contrib))
-        (lambda ((p : param) (s : state) (c : cell))
-            (('leak , (current-contrib (* (- c.v p.erev) p.g0 s.m) (* p.g0 s.m))))))
-
-NORA's suggestion
-sim_input = (v:range, dt:range, i:range, g:range)
-sim_output = (i:range, g:range)
-mech_state = (m:range, gbar:range, ehcn:global)
-def current mech:mech_state sim:sim_input =
-   let* ((i_new (add sim.i (mul (mul mech.gbar mech.m) (sub sim.v mech.ehcn))))) (g_new (add sim.g (mul mech.gbar mech.m))) )
-   in (create sim_output(i_new, g_new))
-*/
 
 int main() {
     auto Ih_current =
@@ -69,8 +54,8 @@ int main() {
                                          ("sim_g"_var + ("mech_gbar"_var * "mech_m"_var)),
                                          tuple({"i_new"_var, "g_new"_var}))))))))));
     compile(Ih_current);
-    compile(let("f", lambda({"x"}, "x"_var + "x"_var), apply("f"_var, {42.0_f64})));
-    // compile(let("a", 42.0_f64, let("b", "a"_var, "b"_var)));
-    compile(let("a", 42.0_f64, "a"_var));
+    // compile(let("f", lambda({"x"}, "x"_var + "x"_var), apply("f"_var, {42.0_f64})));
+    // compile(let("a", tuple({1.0_f64, 2.0_f64, 3.0_f64}), let("b", project(1, "a"_var), "b"_var)));
+    // compile(let("a", 42.0_f64, "a"_var + "a"_var));
     // compile(let("f", lambda({"y"}, "y"_var + "y"_var), let("a", apply("f"_var, {1.0_f64}), "a"_var)));
 }

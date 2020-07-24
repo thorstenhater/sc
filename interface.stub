@@ -1,0 +1,26 @@
+(c-include "interface.h")
+
+(define-c-struct ast
+  predicate: ast?
+  finalizer: ast_destroy)
+(define-c void (ast:show ast_show) ((const ast)))
+
+(define-c (free maybe-null ast) (ast:let    ast_let)    (string (const ast) (const ast)))
+(define-c (free maybe-null ast) (ast:lambda ast_lambda) ((const array string null) (const ast)))
+(define-c (free maybe-null ast) (ast:var    ast_var)    ((const string)))
+(define-c (free maybe-null ast) (ast:f64    ast_f64)    (double))
+(define-c (free maybe-null ast) (ast:alpha-convert ast_alpha_convert) ((const ast)))
+(define-c (free maybe-null ast) (ast:typecheck ast_typecheck) ((const ast)))
+(define-c (free maybe-null ast) (ast:tuple ast_tuple) ((array (const ast) null)))
+
+(define-c-struct cps predicate: cps? finalizer: cps_destroy)
+(define-c void (cps:show cps_show) ((const cps)))
+
+(define-c (free maybe-null cps) (ast->cps ast_to_cps) ((const ast)))
+(define-c (free maybe-null cps) (cps:beta-cont cps_beta_cont) ((const cps)))
+(define-c (free maybe-null cps) (cps:beta-func cps_beta_func) ((const cps)))
+(define-c (free maybe-null cps) (cps:prim-cse cps_prim_cse) ((const cps)))
+(define-c (free maybe-null cps) (cps:prim-simplify cps_prim_simplify) ((const cps)))
+(define-c (free maybe-null cps) (cps:dead-let cps_dead_let) ((const cps)))
+
+(define-c void (cps:gen-cxx cps_gen_cxx) ((const cps)))

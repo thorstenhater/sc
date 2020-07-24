@@ -169,9 +169,13 @@ namespace TailCPS {
     }
 
     term dead_let(const term& t) {
-        auto live = used_symbols(t);
-        auto dead = DeadLet(live);
-        return std::visit(dead, *t);
+        auto tmp = t;
+        for (;;) {
+            auto live = used_symbols(tmp);
+            auto dead = DeadLet(live);
+            tmp = std::visit(dead, *tmp);
+            if (dead.count == 0) return tmp;
+        }
     }
 
     term beta_func(const term& t) {

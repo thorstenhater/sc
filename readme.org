@@ -1,0 +1,502 @@
+#+TITLE: ArbLang
+
+#+AUTHOR: T. Hater
+#+OPTIONS: toc:nil
+#+LaTeX_CLASS_OPTIONS: [a4paper]
+#+LATEX_HEADER: \usepackage{a4wide}
+
+* Compiler
+The compiler is organised in layers
+- Source :: High-level input language, very similar to Scheme
+- De-Sugared Source :: remove some syntatic niceties, lower types
+- AST :: abstract syntax tree
+  - type checking
+  - unique naming
+- CPS :: intermediate representation based on \lambda calculus
+
+On top of the Source language, I started to define some macros to handle
+construction of mechanism and similar.
+
+** Source Language
+The source language consists of 'terms', which are
+- Values :: Literal values
+  - F64 :: double precision numbers
+  - Bool :: booleans
+- Bindings :: bind values to names to make them available in the enclosed term
+  #+begin_example scheme
+  (let ((<symbol> <term>)
+        (...)
+         ...)
+       <term>)
+  #+end_example
+- Variables :: lookup a binding in the enclosing environment
+- Functions :: anonymous functions
+  #+begin_example scheme
+  (lambda (<symbol> ...)
+      <term>)
+  #+end_example
+- Application :: apply a function to a list of arguments
+  #+begin_example scheme
+  (<term> <term> ...)
+  #+end_example
+- Tuples :: Product types, consisting of a fixed number of terms
+  #+begin_example scheme
+  (tuple <term> <term> ...)
+  #+end_example
+- Tuple projection :: Extract one field of a tuple. The field must be known at
+  compile time.
+  #+begin_example scheme
+  (pi-<integer> <term>)
+  #+end_example
+- If-then-else :: Conditional expression, returns either the left or the right
+  arm
+  #+begin_example scheme
+  (if <term>   ;; predicate
+      <term>   ;; returned if predicate is true
+      <term>)  ;; returned if predicate is false
+  #+end_example
+- Primitive operations ::
+  - binary f64 :: + * - ...
+  - comparison :: > < = ...
+  - math functions :: exp log ...
+- Types :: a simple extensible type system
+  - variable bindings can optionally be annotate using this syntax
+    #+begin_example scheme
+    (let ((<symbol> <term> <type>)...) ...)
+    #+end_example
+  - new types can be declared
+    #+begin_example scheme
+    (define-type <symbol> ((<symbol> <type>)...))
+    #+end_example
+  - allowable types
+    - primitive :: ~f64~, ~bool~
+      - primitive types must also be annotated with two /kinds/
+        - ~unique~ or ~range~ :: value is same for all CVs
+        - ~constant~ or ~mutable~ :: after definition, this value will not change
+    - tuple :: ~(<type>, <type>, ...)~
+    - function :: ~<arg0:type> -> <arg1:type> -> ... -> <result:type>~
+    - user defined types :: as per above
+
+** De-sugared source
+The Source Language is passed to a de-sugaring stage, that applies the following
+transformations
+- make literals explicit by applying constructors
+  #+begin_example scheme
+  (de-sugar <true|false>)
+    => (bool <true|false>)
+  (de-sugar <numeric>)
+    => (f64 <numeric>)
+  #+end_example
+- Turn lists of let into nested lets
+  #+begin_example scheme
+  (de-sugar
+    (let ((x 1)
+          (y 2))
+       <term>))
+  => (let (x 1)
+       (let (y 2)
+         <term>))
+  #+end_example
+- Make application explicit
+  #+begin_example scheme
+  (de-sugar (<term> <term>))
+  => (apply <term> <term>)
+  #+end_example
+- flatten primitive operations
+  #+begin_example scheme
+  (de-sugar (+ x y z))  => (+ x (+ y z))
+  (de-sugar (- x y z))  => (- x (+ y z))
+  #+end_example
+- Turn user defined types into tuples and helper functions
+  #+begin_example scheme
+  (de-sugar
+    (define-type point ((x f64) (y f64))))
+  #+end_example
+  1. alias ~point~ to a tuple type ~(f64 f64)~
+  2. define a constructor ~point~ that takes two ~f64~ and returns a ~(f64 f64)~
+  3. define accessors ~x~ and ~y~ to access fields, equivalent to ~pi-0~ and
+     ~pi-1~
+     
+*** Implementation status
+- Written in scheme
+- complete, with exceptions
+  - conditionals
+  - primitive apart from * / + -
+  - type declarations and annotations
+
+** Abstract Syntax Tree (AST)
+The de-sugared source language is turned almost verbatim into an AST.
+
+*** Implementation status
+- Written in C++
+  - Bindings in Scheme, which are not yet complete due to a bug in the
+    underlying project
+- complete, with exceptions
+  - primitive apart from * / + -
+  - type declarations
+
+** Alpha Conversion
+To prepare for the following phases, all variable names are made unique. This is
+done by generating a fresh symbol for every name. In some cases, the original
+name needs to be preserved, ie top-level definitions. This preserves type
+annotations.
+
+*** Implementation status
+- Written in C++
+- complete, except preservation of original names
+
+** Type Checking
+The AST is traversed and a type is attached to every term. This done by
+unification of type variables. Where possible, types are inferred by first-use.
+Original type annotations are used to inform unification.
+
+The type system has the following members at this stage
+- Primitives :: ~f64~, ~bool~
+- Tuples :: ~(<type>, <type>, ...)~
+- Functions :: ~(<type>, <type>, ...) -> <type>~
+
+*** Implementation status
+- Written in C++
+- complete, except
+  - honouring of type annotations needs to be improved
+  - range vs unique
+
+** Conversion to Continuation Passing Style (CPS)
+This is mainly based on Kennedy '07. The transformation is a bit involved, I
+will summarise the core features of the output here.
+
+The CPS language consists of values and terms which do not mix. This is an
+import difference to the AST, where all terms can appear everywhere.
+
+The values are
+- Tuple :: ~(<symbol>, ...)~
+  - Note that tuples are constructed over variable names, not values
+- F64 :: double literals
+- Bool :: boolean literals
+
+The terms are
+ - LetV :: bind a value to a name for access in the body, this is the *only* place
+   values can enter
+   #+begin_example scheme
+   (let-value <name:symbol> <value:value> <in:term>)
+   #+end_example
+ - LetC :: bind a continuation
+   #+begin_example scheme
+   (let-continuation <name:symbol> (<arg0:symbol> ...) <body:term> <in:term>)
+   #+end_example
+ - LetT :: project member from a tuple, bind result
+   #+begin_example scheme
+   (let-project <name:symbol> <tuple:symbol> <in:term>)
+   #+end_example
+ - LetF :: bind a function
+   #+begin_example scheme
+   (let-function <name:symbol> <continuation:symbol> (<arg0:symbol> ...) <body:term> <in:term>)
+   #+end_example
+ - LetP :: apply primitive operation to arguments bound by name bind result
+   #+begin_example scheme
+   (let-primop <name:symbol> <primop:symbol> (<arg0:symbol> ...) <body:term> <in:term>)
+   #+end_example
+ - AppC :: apply a continuation bound by name to arguments bound by name
+   #+begin_example scheme
+   (apply-continuation <name:symbol> (<arg0:symbol> ...))
+   #+end_example
+ - AppF :: apply a function bound by name to arguments bound by name, then pass
+   the result to the given continuation
+   #+begin_example scheme
+   (apply-function <name:symbol> <continuation:symbol> (<arg0:symbol> ...))
+   #+end_example
+ - Halt :: terminate and return variable content
+   #+begin_example scheme
+   (halt <name:symbol>)
+   #+end_example
+
+Continuations are local functions that never escape and cannot be defined
+globally. Thus we can compile them efficiently by simple jumps, if they appear
+in the final program.
+
+Functions take an extra continuation argument that deals with the function
+result. Thus functions as such never return. Due to this mechanism there is no
+need to bind results.
+
+The transformation can leave no terms of the kind ~(let (x 42) (let (y x) ...))~
+
+*** Implementation status
+- Written in C++, exposed to scheme
+- Complete, except conditionals
+- I would like to have a type checker for CPS, to verify soundness of
+  optimisations
+- It would be helpful to canonicalise argument order in primitive operations, in
+  particular it helps CSE, see later
+
+** Dead Code Elimination
+Traverse the CPS tree, tally use sites per variable and delete unused binding
+sites. This is iterated to steady state.
+
+*** Implementation status
+- Written in C++, exposed to scheme
+- Complete
+- Could be made more efficient, by combining the tally and delete step, ie
+  counting use-sites and recursively deleting and decrementing this census.
+
+** Inlining
+Both functions and continuations are completely inlined. So far, I have seen no
+continuations and only toplevel functions in final code. After inlining, dead
+code elimination is run again, to get rid of redundant bindings of continuations
+and functions.
+
+*** Implementation status
+- Written in C++, exposed to scheme
+- Complete
+
+** Common Subexpression Elimination (CSE)
+Traverse the tree find multiple uses of primitives with the same arguments. The
+first (outermost) binding is used for all instances. Afterwards, the dead
+bindings are eliminated.
+
+*** Implementation status
+- Written in C++, exposed to scheme
+- Complete
+- Currently only matches exact argument lists, but for commutative operations
+  could be re-ordered to expose more uses
+
+** Constant Folding
+Traverse the tree marking known constant variables: tuples, booleans, and doubles.
+Wherever possible, arithmetic operations are collapsed based on this knowledge.
+Afterwards, the dead bindings are eliminated.
+
+*** Implementation status
+- Written in C++, exposed to scheme
+- Rudimentary
+  - of the arithmetic operations as implemented: + - *
+  - tuple projections
+- Not sure if needed, the backend C++ compiler probably takes care of many of
+  these things. However, that might depend on ~--fast-math~, which we do not
+  use.
+
+** C++ Code Generation
+Finally, we turn the CPS tree into C++ in the Single Static Assignment (SSA)
+style. Types are generated from types annotated to the CPS terms.
+
+*** Implementation status
+- Written in C++, exposed to scheme
+- Complete, with exceptions
+  - missing top-level names
+  - no support for range/unique variables
+
+* Where to go from here
+** HIGH Add a complete surface language
+- Reaction systems
+- ODE systems
+
+** HIGH Add a way to return key-value pairs
+- Must have for multiple current contributions
+
+** MEDIUM Define a proper ABI for mechanisms
+
+** MEDIUM Add State-Machines/Markov processes
+
+** LOW Make a lowered version of the IR
+- No more continuations and functions
+- Define a storage format
+- Motivation:
+  - Store optimised IR on disk
+  - When instantiating mechanisms, plug in all constant values and run
+    optimisation again. Then generate final code.
+  - There's multiple levels to this: Can do only for ~unique+constant~, or make
+    one per parameter bundle, bundle mechanism combinations at runtime...
+
+* An Example
+** AST Input in C++
+#+begin_example C++
+lambda({"sim", "mech"},
+  pi("sim_v", 0, "sim"_var,
+    pi("sim_i", 1, "sim"_var,
+      pi("sim_g", 2, "sim"_var,
+        pi("mech_m", 0, "mech"_var,
+          pi("mech_gbar", 1, "mech"_var,
+            pi("mech_ehcn", 2, "mech"_var,
+              let("i_new",
+                 ("sim_i"_var + (("mech_gbar"_var * "mech_m"_var) * ("sim_v"_var - "mech_ehcn"_var))),
+                 let("g_new",
+                    ("sim_g"_var + ("mech_gbar"_var * "mech_m"_var)),
+                    tuple({"i_new"_var, "g_new"_var}))))))))));
+#+end_example
+** Type check
+#+begin_example scheme
+(lambda (sim mech ): ((F64, F64, F64, ), (F64, F64, F64, ), ) -> (F64, F64, )
+    (let (sim_v (pi-0 sim: (F64, F64, F64, )))
+        (let (sim_i (pi-1 sim: (F64, F64, F64, )))
+            (let (sim_g (pi-2 sim: (F64, F64, F64, )))
+                (let (mech_m (pi-0 mech: (F64, F64, F64, )))
+                    (let (mech_gbar (pi-1 mech: (F64, F64, F64, )))
+                        (let (mech_ehcn (pi-2 mech: (F64, F64, F64, )))
+                            (let (i_new (+ sim_i: F64 (* (* mech_gbar: F64 mech_m: F64 ): F64 (- sim_v: F64 mech_ehcn: F64 ): F64 ): F64 ): F64)
+                                (let (g_new (+ sim_g: F64 (* mech_gbar: F64 mech_m: F64 ): F64 ): F64)
+                                    (i_new: F64, g_new: F64, ))))))))))
+#+end_example
+** Alpha Conversion
+#+begin_example scheme
+(lambda (__ast_var_0 __ast_var_1 ): ((F64, F64, F64, ), (F64, F64, F64, ), ) -> (F64, F64, )
+    (let (__ast_var_2 (pi-0 __ast_var_0: (F64, F64, F64, )))
+        (let (__ast_var_3 (pi-1 __ast_var_0: (F64, F64, F64, )))
+            (let (__ast_var_4 (pi-2 __ast_var_0: (F64, F64, F64, )))
+                (let (__ast_var_5 (pi-0 __ast_var_1: (F64, F64, F64, )))
+                    (let (__ast_var_6 (pi-1 __ast_var_1: (F64, F64, F64, )))
+                        (let (__ast_var_7 (pi-2 __ast_var_1: (F64, F64, F64, )))
+                            (let (__ast_var_8 (+ __ast_var_3: F64 (* (* __ast_var_6: F64 __ast_var_5: F64 ): F64 (- __ast_var_2: F64 __ast_var_7: F64 ): F64 ): F64 ): F64)
+                                (let (__ast_var_9 (+ __ast_var_4: F64 (* __ast_var_6: F64 __ast_var_5: F64 ): F64 ): F64)
+                                    (__ast_var_8: F64, __ast_var_9: F64, ))))))))))
+#+end_example
+** CPS conversion
+#+begin_example scheme
+(let-func __var_0 __var_1 (__ast_var_0 __ast_var_1 ): ((F64, F64, F64, ), (F64, F64, F64, ), ) -> (F64, F64, )
+    ;; function
+    (let-cont __var_21 (__ast_var_2 )
+        (let-cont __var_19 (__ast_var_3 )
+            (let-cont __var_17 (__ast_var_4 )
+                (let-cont __var_15 (__ast_var_5 )
+                    (let-cont __var_13 (__ast_var_6 )
+                        (let-cont __var_11 (__ast_var_7 )
+                            (let-cont __var_6 (__ast_var_8 )
+                                (let-cont __var_3 (__ast_var_9 )
+                                    (let-value (__var_2 (__ast_var_8, __ast_var_9, ): (F64, F64, ))
+                                        (apply-cont __var_1 __var_2))
+                                    (let-prim __var_4 (* __ast_var_6 __ast_var_5 ): F64
+                                        (let-prim __var_5 (+ __ast_var_4 __var_4 ): F64
+                                            (apply-cont __var_3 __var_5))))
+                                (let-prim __var_7 (* __ast_var_6 __ast_var_5 ): F64
+                                    (let-prim __var_8 (- __ast_var_2 __ast_var_7 ): F64
+                                        (let-prim __var_9 (* __var_7 __var_8 ): F64
+                                            (let-prim __var_10 (+ __ast_var_3 __var_9 ): F64
+                                                (apply-cont __var_6 __var_10))))))
+                            (pi-2 __var_12 __ast_var_1)
+                                (apply-cont __var_11 __var_12)))
+                        (pi-1 __var_14 __ast_var_1)
+                            (apply-cont __var_13 __var_14)))
+                    (pi-0 __var_16 __ast_var_1)
+                        (apply-cont __var_15 __var_16)))
+                (pi-2 __var_18 __ast_var_0)
+                    (apply-cont __var_17 __var_18)))
+            (pi-1 __var_20 __ast_var_0)
+                (apply-cont __var_19 __var_20)))
+        (pi-0 __var_22 __ast_var_0)
+            (apply-cont __var_21 __var_22)))
+    ;; in
+    (halt __var_0))
+#+end_example
+** Dead Code Elimination
+#+begin_example scheme
+(let-func __var_0 __var_1 (__ast_var_0 __ast_var_1 ): ((F64, F64, F64, ), (F64, F64, F64, ), ) -> (F64, F64, )
+    ;; function
+    (let-cont __var_21 (__ast_var_2 )
+        (let-cont __var_19 (__ast_var_3 )
+            (let-cont __var_17 (__ast_var_4 )
+                (let-cont __var_15 (__ast_var_5 )
+                    (let-cont __var_13 (__ast_var_6 )
+                        (let-cont __var_11 (__ast_var_7 )
+                            (let-cont __var_6 (__ast_var_8 )
+                                (let-cont __var_3 (__ast_var_9 )
+                                    (let-value (__var_2 (__ast_var_8, __ast_var_9, ): (F64, F64, ))
+                                        (apply-cont __var_1 __var_2))
+                                    (let-prim __var_4 (* __ast_var_6 __ast_var_5 ): F64
+                                        (let-prim __var_5 (+ __ast_var_4 __var_4 ): F64
+                                            (apply-cont __var_3 __var_5))))
+                                (let-prim __var_7 (* __ast_var_6 __ast_var_5 ): F64
+                                    (let-prim __var_8 (- __ast_var_2 __ast_var_7 ): F64
+                                        (let-prim __var_9 (* __var_7 __var_8 ): F64
+                                            (let-prim __var_10 (+ __ast_var_3 __var_9 ): F64
+                                                (apply-cont __var_6 __var_10))))))
+                            (pi-2 __var_12 __ast_var_1)
+                                (apply-cont __var_11 __var_12)))
+                        (pi-1 __var_14 __ast_var_1)
+                            (apply-cont __var_13 __var_14)))
+                    (pi-0 __var_16 __ast_var_1)
+                        (apply-cont __var_15 __var_16)))
+                (pi-2 __var_18 __ast_var_0)
+                    (apply-cont __var_17 __var_18)))
+            (pi-1 __var_20 __ast_var_0)
+                (apply-cont __var_19 __var_20)))
+        (pi-0 __var_22 __ast_var_0)
+            (apply-cont __var_21 __var_22)))
+    ;; in
+    (halt __var_0))
+#+end_example
+** Inlining
+#+begin_example scheme
+(let-func __var_0 __var_1 (__ast_var_0 __ast_var_1 ): ((F64, F64, F64, ), (F64, F64, F64, ), ) -> (F64, F64, )
+    ;; function
+    (pi-0 __var_22 __ast_var_0)
+        (pi-1 __var_20 __ast_var_0)
+            (pi-2 __var_18 __ast_var_0)
+                (pi-0 __var_16 __ast_var_1)
+                    (pi-1 __var_14 __ast_var_1)
+                        (pi-2 __var_12 __ast_var_1)
+                            (let-prim __var_7 (* __var_14 __var_16 ): F64
+                                (let-prim __var_8 (- __var_22 __var_12 ): F64
+                                    (let-prim __var_9 (* __var_7 __var_8 ): F64
+                                        (let-prim __var_10 (+ __var_20 __var_9 ): F64
+                                            (let-prim __var_4 (* __var_14 __var_16 ): F64
+                                                (let-prim __var_5 (+ __var_18 __var_4 ): F64
+                                                    (let-value (__var_2 (__var_10, __var_5, ): (F64, F64, ))
+                                                        (apply-cont __var_1 __var_2))))))))))))))
+    ;; in
+    (halt __var_0))
+#+end_example
+** PrimOp CSE
+#+begin_example scheme
+(let-func __var_0 __var_1 (__ast_var_0 __ast_var_1 ): ((F64, F64, F64, ), (F64, F64, F64, ), ) -> (F64, F64, )
+    ;; function
+    (pi-0 __var_22 __ast_var_0)
+        (pi-1 __var_20 __ast_var_0)
+            (pi-2 __var_18 __ast_var_0)
+                (pi-0 __var_16 __ast_var_1)
+                    (pi-1 __var_14 __ast_var_1)
+                        (pi-2 __var_12 __ast_var_1)
+                            (let-prim __var_7 (* __var_14 __var_16 ): F64
+                                (let-prim __var_8 (- __var_22 __var_12 ): F64
+                                    (let-prim __var_9 (* __var_7 __var_8 ): F64
+                                        (let-prim __var_10 (+ __var_20 __var_9 ): F64
+                                            (let-prim __var_5 (+ __var_18 __var_7 ): F64
+                                                (let-value (__var_2 (__var_10, __var_5, ): (F64, F64, ))
+                                                    (apply-cont __var_1 __var_2)))))))))))))
+    ;; in
+    (halt __var_0))
+#+end_example
+** PrimOp Simplification
+#+begin_example scheme
+(let-func __var_0 __var_1 (__ast_var_0 __ast_var_1 ): ((F64, F64, F64, ), (F64, F64, F64, ), ) -> (F64, F64, )
+    ;; function
+    (pi-0 __var_22 __ast_var_0)
+        (pi-1 __var_20 __ast_var_0)
+            (pi-2 __var_18 __ast_var_0)
+                (pi-0 __var_16 __ast_var_1)
+                    (pi-1 __var_14 __ast_var_1)
+                        (pi-2 __var_12 __ast_var_1)
+                            (let-prim __var_7 (* __var_14 __var_16 ): F64
+                                (let-prim __var_8 (- __var_22 __var_12 ): F64
+                                    (let-prim __var_9 (* __var_7 __var_8 ): F64
+                                        (let-prim __var_10 (+ __var_20 __var_9 ): F64
+                                            (let-prim __var_5 (+ __var_18 __var_7 ): F64
+                                                (let-value (__var_2 (__var_10, __var_5, ): (F64, F64, ))
+                                                    (apply-cont __var_1 __var_2)))))))))))))
+    ;; in
+    (halt __var_0))
+#+end_example
+** Generate CXX
+#+begin_example c++
+std::tuple<double, double> __var_0(std::tuple<double, double, double> __ast_var_0, std::tuple<double, double, double> __ast_var_1) {
+    const auto __var_22 = std::get<0>(__ast_var_0);
+    const auto __var_20 = std::get<1>(__ast_var_0);
+    const auto __var_18 = std::get<2>(__ast_var_0);
+    const auto __var_16 = std::get<0>(__ast_var_1);
+    const auto __var_14 = std::get<1>(__ast_var_1);
+    const auto __var_12 = std::get<2>(__ast_var_1);
+    const auto __var_7 = __var_14 * __var_16;
+    const auto __var_8 = __var_22 - __var_12;
+    const auto __var_9 = __var_7 * __var_8;
+    const auto __var_10 = __var_20 + __var_9;
+    const auto __var_5 = __var_18 + __var_7;
+    const auto __var_2 = std::tuple<double, double>{__var_10, __var_5};
+    return __var_2;
+}
+#+end_example
