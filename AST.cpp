@@ -110,11 +110,12 @@ namespace AST {
         expr cond(const expr& p, const expr& t, const expr& f) { return make_expr<Cond>(p, t, f); }
         expr f64(double v) { return make_expr<F64>(v); }
         expr var(const std::string& n) { return make_expr<Var>(n); }
+        expr prim(const std::string& fun, const std::vector<expr>& args) { return make_expr<Prim>(fun, args); }
         expr add(const expr& l, const expr& r) { return make_expr<Prim>("+", std::vector<expr>{l, r}); }
         expr mul(const expr& l, const expr& r) { return make_expr<Prim>("*", std::vector<expr>{l, r}); }
         expr sub(const expr& l, const expr& r) { return make_expr<Prim>("-", std::vector<expr>{l, r}); }
         expr lambda(const std::vector<std::string>& args, const expr& body) { return make_expr<Lam>(args, body); }
-        expr apply(const expr& fun, const std::vector<expr>&& args) { return make_expr<App>(fun, args); }
+        expr apply(const expr& fun, const std::vector<expr>& args) { return make_expr<App>(fun, args); }
         expr let(const std::string& var, const expr& bind, const expr& in, const Types::type& t) { return make_expr<Let>(var, bind, in, t); }
 
         expr pi(const std::string& var, size_t field, const expr& tuple, const expr& in) { return let(var, project(field, tuple), in); }

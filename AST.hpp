@@ -207,6 +207,7 @@ namespace AST {
     expr cond(const expr& p, const expr& t, const expr& f);
     expr f64(double v);
     expr var(const std::string& n);
+    expr prim(const std::string&, const std::vector<expr>&);
     expr add(const expr& l, const expr& r);
     expr mul(const expr& l, const expr& r);
     expr sub(const expr& l, const expr& r);
