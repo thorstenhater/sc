@@ -179,17 +179,11 @@ namespace TailCPS {
     }
 
     term beta_func(const term& t) {
-        auto expanded = std::visit(BetaFunc{}, *t);
-        auto used     = UsedSymbols(); std::visit(used, *expanded);
-        auto cleaned  = std::visit(DeadLet(used.symbols), *expanded);
-        return cleaned;
+        return dead_let(std::visit(BetaFunc{}, *t));
     }
 
     term beta_cont(const term& t) {
-        auto expanded = std::visit(BetaCont{}, *t);
-        auto used     = UsedSymbols(); std::visit(used, *expanded);
-        auto cleaned  = std::visit(DeadLet(used.symbols), *expanded);
-        return cleaned;
+        return dead_let(std::visit(BetaCont{}, *t));
     }
 
     term prim_cse(const term& t) {
