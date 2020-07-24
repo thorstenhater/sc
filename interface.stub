@@ -12,6 +12,8 @@
 (define-c (free maybe-null ast) (ast:alpha-convert ast_alpha_convert) ((const ast)))
 (define-c (free maybe-null ast) (ast:typecheck ast_typecheck) ((const ast)))
 (define-c (free maybe-null ast) (ast:tuple ast_tuple) ((array (const ast) null)))
+(define-c (free maybe-null ast) (ast:prim ast_prim) ((const string) (array (const ast) null)))
+(define-c (free maybe-null ast) (ast:pi ast_pi) (int (const ast)))
 
 (define-c-struct cps predicate: cps? finalizer: cps_destroy)
 (define-c void (cps:show cps_show) ((const cps)))
