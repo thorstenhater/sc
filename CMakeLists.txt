@@ -29,20 +29,17 @@ ExternalProject_Add(chibi
 
 file(COPY ${CMAKE_SOURCE_DIR}/compiler DESTINATION ${CMAKE_BINARY_DIR})
 
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/interface.cxx
+add_custom_target(stub
   COMMAND chibi-ffi ${CMAKE_SOURCE_DIR}/interface.stub
-  COMMAND mv ${CMAKE_SOURCE_DIR}/interface.c ${CMAKE_BINARY_DIR}/interface.cxx)
+  COMMAND mv ${CMAKE_SOURCE_DIR}/interface.c ${CMAKE_BINARY_DIR}/interface.cxx
+  BYPRODUCTS ${CMAKE_BINARY_DIR}/interface.cxx)
 
 add_library(interface SHARED ${CMAKE_SOURCE_DIR}/interface.h ${CMAKE_BINARY_DIR}/interface.cxx)
+add_dependencies(interface stub)
 target_include_directories(interface PUBLIC "/usr/local/include/")
 target_include_directories(interface PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(interface PUBLIC -L/usr/local/lib/ -lchibi-scheme)
 target_link_libraries(interface PUBLIC cps)
-# set_target_properties(interface PROPERTIES LINKER_LANGUAGE CXX)
-
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/interface.cxx
-  COMMAND chibi-ffi ${CMAKE_SOURCE_DIR}/interface.stub
-  COMMAND mv ${CMAKE_SOURCE_DIR}/interface.c ${CMAKE_BINARY_DIR}/interface.cxx)
 
 add_custom_command(TARGET interface
   POST_BUILD VERBATIM
