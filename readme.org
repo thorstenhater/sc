@@ -48,6 +48,11 @@ The source language consists of 'terms', which are
   #+begin_example scheme
   (pi-<integer> <term>)
   #+end_example
+- De-structuring bind :: De-compose a tuple and make constituents available in enclosed term
+  #+begin_example scheme
+  (let* ((<var0:symbol> <var1:symbol> ...) <tupel:term>) <in:term>)
+  #+end_example
+
 - If-then-else :: Conditional expression, returns either the left or the right
   arm
   #+begin_example scheme
